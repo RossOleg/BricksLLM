@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useApi } from "@/hooks/useApi";
 import { PageHeader, StatusBadge, EmptyState } from "@/components/ui/page-helpers";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,20 @@ import { KeyRound, Plus, Copy, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 
-const KNOWN_SETTING_ID = "1746f660-3869-44b1-a06e-f564ced675e4";
 const AVAILABLE_TAGS = ["client", "daminion", "trial", "newyearevent"];
+
+// Ключ обязан назвать настройку провайдера, через которую пойдут его запросы.
+// Раньше id был вписан в код одной строкой; теперь он выбирается, а последний
+// выбор запоминается, чтобы не тыкать его каждый раз.
+const SETTING_STORAGE_KEY = "bricks_setting_id";
+
+function rememberSetting(id: string) {
+  try { localStorage.setItem(SETTING_STORAGE_KEY, id); } catch { /* приватное окно */ }
+}
+
+function recallSetting(): string {
+  try { return localStorage.getItem(SETTING_STORAGE_KEY) || ""; } catch { return ""; }
+}
 
 function generateKey() {
   const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -35,6 +47,10 @@ const KeysPage: React.FC = () => {
   const [searchTag, setSearchTag] = useState("");
   const [searchName, setSearchName] = useState("");
 
+  // Настройки провайдера для выбора при создании ключа.
+  const [settings, setSettings] = useState<any[]>([]);
+  const [settingId, setSettingId] = useState<string>(recallSetting());
+
   // Create form
   const [form, setForm] = useState({
     name: "",
@@ -50,6 +66,26 @@ const KeysPage: React.FC = () => {
     shouldLogResponse: true,
   });
 
+  const loadSettings = useCallback(async () => {
+    if (!api) return;
+    try {
+      const list = await api.listProviderSettings();
+      const available = Array.isArray(list) ? list : [];
+      setSettings(available);
+
+      // Если запомненной настройки больше нет - не молчим, а выбираем
+      // единственную, когда она единственная.
+      setSettingId((current) => {
+        if (current && available.some((s: any) => s.id === current)) return current;
+        return available.length === 1 ? available[0].id : "";
+      });
+    } catch (e: any) {
+      toast.error(`Could not load providers: ${e.message}`);
+    }
+  }, [api]);
+
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
   const fetchKeys = async () => {
     if (!api) return;
     if (!searchTag && !searchName) {
@@ -62,7 +98,9 @@ const KeysPage: React.FC = () => {
       if (searchTag) body.tags = [searchTag.trim()];
       if (searchName) body.name = searchName.trim();
       const data = await api.listKeys(body);
-      setKeys(data || []);
+      // Этот эндпоинт отдаёт { keys, count }, а не голый массив - в отличие от
+      // остальных списков панели.
+      setKeys(Array.isArray(data) ? data : data?.keys ?? []);
       setSearched(true);
     } catch (e: any) {
       toast.error(e.message);
@@ -73,11 +111,15 @@ const KeysPage: React.FC = () => {
 
   const handleCreate = async () => {
     if (!api) return;
+    if (!settingId) {
+      toast.error("Choose the provider this key will use");
+      return;
+    }
     try {
       const body: any = {
         name: form.name,
         key: form.key,
-        settingIds: [KNOWN_SETTING_ID],
+        settingIds: [settingId],
         isKeyNotHashed: true,
         shouldLogRequest: form.shouldLogRequest,
         shouldLogResponse: form.shouldLogResponse,
@@ -90,6 +132,7 @@ const KeysPage: React.FC = () => {
       if (form.rateLimitOverTime) body.rateLimitUnit = form.rateLimitUnit;
       if (form.ttl) body.ttl = form.ttl;
       await api.createKey(body);
+      rememberSetting(settingId);
       toast.success("Key created");
       setDialogOpen(false);
       setForm({
@@ -123,6 +166,24 @@ const KeysPage: React.FC = () => {
           <DialogContent className="max-h-[85vh] overflow-y-auto">
             <DialogHeader><DialogTitle>New Key</DialogTitle></DialogHeader>
             <div className="space-y-3 pt-2">
+              <div>
+                <Label>Provider</Label>
+                <Select value={settingId} onValueChange={setSettingId}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder={settings.length ? "Choose a provider setting" : "No provider settings found"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {settings.map((s: any) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name || s.id}{s.provider ? ` — ${s.provider}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Requests made with this key go through the chosen provider setting.
+                </p>
+              </div>
               <div><Label>Name</Label><Input className="mt-1" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="My key" /></div>
               <div>
                 <Label>Key (auto-generated)</Label>

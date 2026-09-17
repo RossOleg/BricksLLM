@@ -42,16 +42,19 @@ export class BricksApi {
   healthCheck() { return this.request<void>("GET", "/api/health"); }
 
   // Keys
+  /** Отдаёт { keys, count }, а не голый массив - единственный такой список. */
   listKeys(data: any) { return this.request<any>("POST", "/api/v2/key-management/keys", data); }
-  createKey(data: any) { return this.request<any>("PUT", "/api/v2/key-management/keys", data); }
-  updateKey(keyId: string, data: any) { return this.request<any>("PATCH", `/api/v2/key-management/keys`, data); }
+  /** Создание и правка живут без префикса v2, и правка требует id в пути. */
+  createKey(data: any) { return this.request<any>("PUT", "/api/key-management/keys", data); }
+  updateKey(keyId: string, data: any) { return this.request<any>("PATCH", `/api/key-management/keys/${keyId}`, data); }
 
   // Provider Settings
   listProviderSettings(ids?: string[]) {
     const params = ids?.length ? { ids: ids.join(",") } : undefined;
     return this.request<any[]>("GET", "/api/provider-settings", undefined, params);
   }
-  createProviderSetting(data: any) { return this.request<any>("POST", "/api/provider-settings", data); }
+  /** Создание настройки провайдера - PUT, а не POST. */
+  createProviderSetting(data: any) { return this.request<any>("PUT", "/api/provider-settings", data); }
   updateProviderSetting(id: string, data: any) { return this.request<any>("PATCH", `/api/provider-settings/${id}`, data); }
 
   // Events
@@ -73,10 +76,10 @@ export class BricksApi {
 
   // Policies
   listPolicies(tags: string[]) {
-    return this.request<any[]>("GET", "/policies", undefined, { tags: tags.join(",") });
+    return this.request<any[]>("GET", "/api/policies", undefined, { tags: tags.join(",") });
   }
-  createPolicy(data: any) { return this.request<any>("POST", "/policies", data); }
-  updatePolicy(id: string, data: any) { return this.request<any>("PATCH", `/policies/${id}`, data); }
+  createPolicy(data: any) { return this.request<any>("POST", "/api/policies", data); }
+  updatePolicy(id: string, data: any) { return this.request<any>("PATCH", `/api/policies/${id}`, data); }
 
   // Reporting
   getMetrics(data: any) { return this.request<any>("POST", "/api/reporting/events", data); }
