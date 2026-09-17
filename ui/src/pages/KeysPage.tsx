@@ -110,6 +110,10 @@ const KeysPage: React.FC = () => {
   // Настройки провайдера для выбора при создании ключа.
   const [settings, setSettings] = useState<any[]>([]);
   const [settingId, setSettingId] = useState<string>(recallSetting());
+  // Фильтр по настройке провайдера. Сервер такого фильтра не умеет - в списке
+  // ключей можно отбирать по тегу, имени и id, но не по настройке, - поэтому
+  // сужаем уже загруженные строки и говорим об этом на форме.
+  const [providerFilter, setProviderFilter] = useState("all");
 
   // Create form
   const [form, setForm] = useState({
@@ -184,6 +188,19 @@ const KeysPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const settingNames = new Map(settings.map((s: any) => [s.id, s.name || s.provider || s.id]));
+
+  const keySettingIds = (k: any): string[] => {
+    const ids = [...(k.settingIds || [])];
+    if (k.settingId && !ids.includes(k.settingId)) ids.push(k.settingId);
+    return ids.filter(Boolean);
+  };
+
+  const shownKeys = keys.filter((k: any) => {
+    if (providerFilter === "all") return true;
+    return keySettingIds(k).includes(providerFilter);
+  });
 
   const handleCreate = async () => {
     if (!api) return;
@@ -413,23 +430,38 @@ const KeysPage: React.FC = () => {
             <Label className="text-xs text-muted-foreground">Search by Name</Label>
             <Input className="mt-1" value={searchName} onChange={e => setSearchName(e.target.value)} placeholder="e.g. My Key" onKeyDown={e => e.key === "Enter" && fetchKeys()} />
           </div>
+          {isFull && settings.length > 1 && (
+            <div>
+              <Label className="text-xs text-muted-foreground">Provider</Label>
+              <Select value={providerFilter} onValueChange={setProviderFilter}>
+                <SelectTrigger className="mt-1 w-48"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All providers</SelectItem>
+                  {settings.map((s: any) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name || s.provider || s.id}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <Button onClick={fetchKeys} disabled={loading} className="shrink-0">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4 mr-1.5" />}
             Search
           </Button>
         </div>
 
-        {searched && keys.length > 0 && (
+        {searched && shownKeys.length > 0 && (
           <div className="mb-3 flex justify-end">
             <Button
               variant="outline"
               size="sm"
               onClick={() =>
-                downloadCsv("keys", keys, [
+                downloadCsv("keys", shownKeys, [
                   { header: "Name", value: (k: any) => k.name },
                   { header: "Key", value: (k: any) => k.key },
                   { header: "Key id", value: (k: any) => k.keyId },
                   { header: "Tags", value: (k: any) => k.tags?.join(" ") },
+                  { header: "Provider", value: (k: any) => keySettingIds(k).map((id) => settingNames.get(id) || id).join(" ") },
                   { header: "Spent USD", value: (k: any) => spend[k.keyId] },
                   { header: "Limit USD", value: (k: any) => k.costLimitInUsd },
                   { header: "Status", value: (k: any) => (k.revoked ? "revoked" : "active") },
@@ -443,8 +475,16 @@ const KeysPage: React.FC = () => {
 
         {!searched ? (
           <EmptyState icon={<KeyRound className="h-6 w-6" />} title="Search for keys" description="Enter a tag or name to find keys" />
-        ) : keys.length === 0 ? (
-          <EmptyState icon={<KeyRound className="h-6 w-6" />} title="No keys found" description="No keys match your search" />
+        ) : shownKeys.length === 0 ? (
+          <EmptyState
+            icon={<KeyRound className="h-6 w-6" />}
+            title="No keys found"
+            description={
+              providerFilter === "all"
+                ? "No keys match your search"
+                : "None of the found keys use this provider setting"
+            }
+          />
         ) : (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-xl border border-border overflow-hidden">
             <Table>
@@ -453,6 +493,7 @@ const KeysPage: React.FC = () => {
                   <TableHead>Name</TableHead>
                   <TableHead>Key</TableHead>
                   <TableHead>Tags</TableHead>
+                  {isFull && <TableHead>Provider</TableHead>}
                   <TableHead>Spent</TableHead>
                   <TableHead>Limit (USD)</TableHead>
                   <TableHead>Rate Limit</TableHead>
@@ -460,7 +501,7 @@ const KeysPage: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {keys.map((key) => (
+                {shownKeys.map((key) => (
                   <TableRow key={key.keyId || key.key}>
                     <TableCell className="font-medium">
                       <button className="hover:underline" onClick={() => setOpenKey(key)}>
@@ -477,6 +518,11 @@ const KeysPage: React.FC = () => {
                         ))}
                       </div>
                     </TableCell>
+                    {isFull && (
+                      <TableCell className="text-xs text-muted-foreground">
+                        {keySettingIds(key).map((id) => settingNames.get(id) || `${id.slice(0, 8)}…`).join(", ") || "—"}
+                      </TableCell>
+                    )}
                     <TableCell className="text-sm">
                       {spend[key.keyId] != null ? `$${spend[key.keyId].toFixed(4)}` : "—"}
                     </TableCell>
