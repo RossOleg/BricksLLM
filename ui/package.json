@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:dev": "vite build --mode development",
+    "build": "vite build && node -e \"require('fs').mkdirSync('dist',{recursive:true});require('fs').writeFileSync('dist/.gitkeep','')\"",
+    "build:dev": "vite build --mode development && node -e \"require('fs').mkdirSync('dist',{recursive:true});require('fs').writeFileSync('dist/.gitkeep','')\"",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
