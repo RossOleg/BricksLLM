@@ -21,6 +21,7 @@ import (
 )
 
 type ProviderSettingsManager interface {
+	GetSettings(withSecret bool, ids []string) ([]*provider.Setting, error)
 	CreateSetting(setting *provider.Setting) (*provider.Setting, error)
 	UpdateSetting(id string, setting *provider.UpdateSetting) (*provider.Setting, error)
 	GetSettingViaCache(id string) (*provider.Setting, error)
@@ -68,7 +69,7 @@ type AdminServer struct {
 	m      KeyManager
 }
 
-func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReportingManager, psm ProviderSettingsManager, cpm CustomProvidersManager, rm RouteManager, pm PoliciesManager, um UserManager, adminPass, supportPass string) (*AdminServer, error) {
+func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReportingManager, psm ProviderSettingsManager, cpm CustomProvidersManager, rm RouteManager, pm PoliciesManager, um UserManager, adminPass, supportPass, supportSettingId string) (*AdminServer, error) {
 	router := gin.New()
 
 	prod := mode == "production"
@@ -94,7 +95,7 @@ func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReporting
 
 	router.POST("/api/v2/key-management/keys", getGetKeysV2Handler(m, prod))
 	router.GET("/api/key-management/keys", getGetKeysHandler(m, prod))
-	router.PUT("/api/key-management/keys", getCreateKeyHandler(m, prod))
+	router.PUT("/api/key-management/keys", getCreateKeyHandler(m, psm, supportSettingId, prod))
 	router.PATCH("/api/key-management/keys/:id", getUpdateKeyHandler(m, prod))
 	router.DELETE("/api/key-management/keys/:id", getDeleteKeyHandler(m, prod))
 
@@ -376,7 +377,21 @@ func getGetProviderSettingsHandler(m ProviderSettingsManager, prod bool) gin.Han
 			return
 		}
 
-		created, err := m.GetSettingsViaCache(c.QueryArray("ids"))
+		// Without ids GetSettingsViaCache answers with an empty list - it looks each
+		// id up one at a time - so "what settings exist" has to go to the store.
+		// Secrets only travel to a session that is allowed to see them.
+		ids := c.QueryArray("ids")
+		full := c.GetString(roleContextKey) != RoleSupport
+
+		var created []*provider.Setting
+		var err error
+
+		if len(ids) == 0 {
+			created, err = m.GetSettings(full, nil)
+		} else {
+			created, err = m.GetSettingsViaCache(ids)
+		}
+
 		if err != nil {
 			errType := "internal"
 
@@ -500,7 +515,7 @@ func getCreateProviderSettingHandler(m ProviderSettingsManager, prod bool) gin.H
 	}
 }
 
-func getCreateKeyHandler(m KeyManager, prod bool) gin.HandlerFunc {
+func getCreateKeyHandler(m KeyManager, psm ProviderSettingsManager, supportSettingId string, prod bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := util.GetLogFromCtx(c)
 		telemetry.Incr("bricksllm.admin.get_create_key_handler.requests", nil, 1)
@@ -551,7 +566,21 @@ func getCreateKeyHandler(m KeyManager, prod bool) gin.HandlerFunc {
 		}
 
 		if c.GetString(roleContextKey) == RoleSupport {
-			if err := applySupportKeyPolicy(rk); err != nil {
+			settings, err := psm.GetSettings(false, nil)
+			if err != nil {
+				logError(log, "error when reading provider settings for a support key", prod, err)
+				c.JSON(http.StatusInternalServerError, &ErrorResponse{
+					Type:     "/errors/provider-settings-manager",
+					Title:    "could not read provider settings",
+					Status:   http.StatusInternalServerError,
+					Detail:   err.Error(),
+					Instance: path,
+				})
+
+				return
+			}
+
+			if err := applySupportKeyPolicy(rk, settings, supportSettingId); err != nil {
 				telemetry.Incr("bricksllm.admin.get_create_key_handler.support_policy_error", nil, 1)
 
 				c.JSON(http.StatusBadRequest, &ErrorResponse{

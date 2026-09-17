@@ -245,6 +245,13 @@ func (m *ProviderSettingsManager) GetSettingViaCache(id string) (*provider.Setti
 	return setting, nil
 }
 
+// GetSettings lists provider settings straight from the store, which is the only
+// way to learn what exists: GetSettingsViaCache looks each id up one by one and
+// answers with nothing at all when no ids are given.
+func (m *ProviderSettingsManager) GetSettings(withSecret bool, ids []string) ([]*provider.Setting, error) {
+	return m.Storage.GetProviderSettings(withSecret, ids)
+}
+
 func (m *ProviderSettingsManager) GetSettingsViaCache(ids []string) ([]*provider.Setting, error) {
 	settings := []*provider.Setting{}
 

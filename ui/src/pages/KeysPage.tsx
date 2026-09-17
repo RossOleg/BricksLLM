@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useApi } from "@/hooks/useApi";
 import { useAuth } from "@/contexts/AuthContext";
+import CreatedKeyDialog from "@/components/CreatedKeyDialog";
 import { PageHeader, StatusBadge, EmptyState } from "@/components/ui/page-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,7 @@ const KeysPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
 
   // Search
   const [searchTag, setSearchTag] = useState("");
@@ -73,7 +75,9 @@ const KeysPage: React.FC = () => {
   });
 
   const loadSettings = useCallback(async () => {
-    if (!api) return;
+    // Только полный режим выбирает провайдера; support-сессии его проставляет
+    // сервер, и спрашивать список ей незачем.
+    if (!api || !isFull) return;
     try {
       const list = await api.listProviderSettings();
       const available = Array.isArray(list) ? list : [];
@@ -88,7 +92,7 @@ const KeysPage: React.FC = () => {
     } catch (e: any) {
       toast.error(`Could not load providers: ${e.message}`);
     }
-  }, [api]);
+  }, [api, isFull]);
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
@@ -117,7 +121,9 @@ const KeysPage: React.FC = () => {
 
   const handleCreate = async () => {
     if (!api) return;
-    if (!settingId) {
+    // Провайдера выбирает только полный режим; support-сессии его проставляет
+    // сервер, поэтому и спрашивать не о чем.
+    if (isFull && !settingId) {
       toast.error("Choose the provider this key will use");
       return;
     }
@@ -133,11 +139,11 @@ const KeysPage: React.FC = () => {
       const body: any = {
         name: form.name,
         key: form.key,
-        settingIds: [settingId],
         isKeyNotHashed: true,
         shouldLogRequest: form.shouldLogRequest,
         shouldLogResponse: form.shouldLogResponse,
       };
+      if (isFull) body.settingIds = [settingId];
       if (form.costLimitInUsd) body.costLimitInUsd = parseFloat(form.costLimitInUsd);
 
       // Остальные способы задать лимит доступны только в полном режиме -
@@ -151,17 +157,16 @@ const KeysPage: React.FC = () => {
         if (form.ttl) body.ttl = form.ttl;
       }
       await api.createKey(body);
-      rememberSetting(settingId);
-      toast.success("Key created");
+      if (isFull) rememberSetting(settingId);
       setDialogOpen(false);
+      // Ключ показывается один раз, в окне, которое не закрыть мимоходом.
+      setCreatedKey(body.key);
       setForm({
         name: "", key: generateKey(), tags: "",
         costLimitInUsd: "", costLimitInUsdOverTime: "", costLimitInUsdUnit: "d",
         rateLimitOverTime: "", rateLimitUnit: "d", ttl: "",
         shouldLogRequest: true, shouldLogResponse: true,
       });
-      // Re-fetch if we had a search
-      if (searched) fetchKeys();
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -185,6 +190,7 @@ const KeysPage: React.FC = () => {
           <DialogContent className="max-h-[85vh] overflow-y-auto">
             <DialogHeader><DialogTitle>New Key</DialogTitle></DialogHeader>
             <div className="space-y-3 pt-2">
+              {isFull && (
               <div>
                 <Label>Provider</Label>
                 <Select value={settingId} onValueChange={setSettingId}>
@@ -203,14 +209,20 @@ const KeysPage: React.FC = () => {
                   Requests made with this key go through the chosen provider setting.
                 </p>
               </div>
+              )}
               <div><Label>Name</Label><Input className="mt-1" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="My key" /></div>
-              <div>
-                <Label>Key (auto-generated)</Label>
-                <div className="flex gap-2 mt-1">
-                  <Input className="font-mono text-xs" value={form.key} onChange={e => setForm(p => ({ ...p, key: e.target.value }))} />
-                  <Button variant="outline" size="icon" onClick={() => setForm(p => ({ ...p, key: generateKey() }))} title="Regenerate">🔄</Button>
+              {isFull && (
+                <div>
+                  <Label>Key</Label>
+                  <div className="flex gap-2 mt-1">
+                    <Input className="font-mono text-xs" value={form.key} onChange={e => setForm(p => ({ ...p, key: e.target.value }))} />
+                    <Button variant="outline" size="icon" onClick={() => setForm(p => ({ ...p, key: generateKey() }))} title="Regenerate">🔄</Button>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Generated as dam- plus a uuid. Typing your own is only possible here.
+                  </p>
                 </div>
-              </div>
+              )}
               {isFull ? (
                 <div>
                   <Label>Tags</Label>
@@ -306,6 +318,14 @@ const KeysPage: React.FC = () => {
           </DialogContent>
         </Dialog>
       </PageHeader>
+
+      <CreatedKeyDialog
+        value={createdKey}
+        onClose={() => {
+          setCreatedKey(null);
+          if (searched) fetchKeys();
+        }}
+      />
 
       <div className="p-6 space-y-4">
         {/* Search bar */}
