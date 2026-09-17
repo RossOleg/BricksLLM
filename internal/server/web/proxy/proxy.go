@@ -704,6 +704,18 @@ func getPassThroughHandler(prod, private bool, client http.Client) gin.HandlerFu
 			logOpenAiError(log, prod, errorRes)
 		}
 
+		// The catalogue is narrowed to what this key may actually use, so that a
+		// picker built from it does not offer models every request would refuse.
+		if c.FullPath() == "/api/providers/openai/v1/models" && c.Request.Method == http.MethodGet && res.StatusCode == http.StatusOK {
+			if filtered, changed := filterModelList(bytes, settingsFromContext(c.Get("settings"))); changed {
+				bytes = filtered
+
+				// The upstream length no longer describes the body, and it is about
+				// to be copied over verbatim.
+				res.Header.Del("Content-Length")
+			}
+		}
+
 		for name, values := range res.Header {
 			for _, value := range values {
 				c.Header(name, value)
