@@ -273,6 +273,31 @@ paths:
                   $ref: "#/components/schemas/ProviderSetting"
 
   /api/provider-settings/{id}:
+    delete:
+      tags:
+        - Provider Settings
+      summary: Delete a provider setting
+      description: >-
+        Removes a provider setting together with the upstream key stored in it.
+        Refused while live keys still point at it: a key whose setting has gone
+        stops working with "not authorised", which reads like a bad key and sends
+        whoever debugs it in the wrong direction. Revoked keys do not hold it back.
+        This endpoint does not exist upstream.
+      parameters:
+        - in: path
+          required: true
+          name: id
+          schema:
+            type: string
+          description: Identifier of the provider setting.
+      responses:
+        204:
+          description: The provider setting is deleted.
+        400:
+          description: Keys still use this provider setting.
+        404:
+          description: The provider setting is not found.
+
     patch:
       tags:
         - Provider Settings

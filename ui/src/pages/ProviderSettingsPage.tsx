@@ -8,7 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Copy, Settings, Loader2 } from "lucide-react";
+import { Plus, Copy, Settings, Loader2, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { rememberSetting, recallSetting } from "@/lib/defaultSetting";
@@ -37,6 +47,8 @@ const ProviderSettingsPage: React.FC = () => {
   const [editForm, setEditForm] = useState({ name: "", allowedModels: "", apikey: "" });
   const [saving, setSaving] = useState(false);
   const [defaultId, setDefaultId] = useState(recallSetting());
+  const [deleting, setDeleting] = useState<any | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -122,6 +134,24 @@ const ProviderSettingsPage: React.FC = () => {
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!api || !deleting) return;
+
+    setRemoving(true);
+    try {
+      await api.deleteProviderSetting(deleting.id);
+      toast.success("Provider setting deleted");
+      setDeleting(null);
+      load();
+    } catch (e: any) {
+      // Сервер отказывает, если на настройку ещё ссылаются ключи, и пишет
+      // сколько именно - показываем это как есть.
+      toast.error(e.message);
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -251,9 +281,20 @@ const ProviderSettingsPage: React.FC = () => {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
-                        Edit
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleting(s)}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -271,6 +312,24 @@ const ProviderSettingsPage: React.FC = () => {
           SUPPORT_SETTING_ID a support session is refused, and told so.
         </p>
       </div>
+
+      <AlertDialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleting?.name || deleting?.provider}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The upstream key stored in it goes with it, and this cannot be undone. Keys still using
+              this setting stop working, so the server refuses while any of them are live.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={removing}>
+              {removing ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent>

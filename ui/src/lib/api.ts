@@ -56,6 +56,8 @@ export class BricksApi {
   /** Создание настройки провайдера - PUT, а не POST. */
   createProviderSetting(data: any) { return this.request<any>("PUT", "/api/provider-settings", data); }
   updateProviderSetting(id: string, data: any) { return this.request<any>("PATCH", `/api/provider-settings/${id}`, data); }
+  /** Удаление есть только в нашем форке: апстрим настройки удалять не умеет. */
+  deleteProviderSetting(id: string) { return this.request<void>("DELETE", `/api/provider-settings/${id}`); }
 
   // Events
   listEvents(params?: Record<string, string>) { return this.request<any[]>("GET", "/api/events", undefined, params); }

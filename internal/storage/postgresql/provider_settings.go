@@ -384,3 +384,48 @@ func (s *Store) GetProviderSettings(withSecret bool, ids []string) ([]*provider.
 
 	return settings, nil
 }
+
+// CountKeysForProviderSetting counts the live keys that point at a setting.
+//
+// Deleting a setting out from under a key does not revoke it - it breaks it: the
+// authenticator cannot resolve a provider for the request and answers that the
+// key is not authorised, which reads like a bad key rather than a missing
+// setting. Revoked keys are not counted; they are dead either way.
+func (s *Store) CountKeysForProviderSetting(id string) (int, error) {
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), s.rt)
+	defer cancel()
+
+	const query = `
+		SELECT COUNT(*) FROM keys
+		WHERE revoked IS NOT TRUE AND (setting_id = $1 OR $1 = ANY(setting_ids))`
+
+	count := 0
+	if err := s.db.QueryRowContext(ctxTimeout, query, id).Scan(&count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// DeleteProviderSetting removes a setting. Whether anything still uses it is
+// decided a level up, in the manager.
+func (s *Store) DeleteProviderSetting(id string) error {
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), s.wt)
+	defer cancel()
+
+	result, err := s.db.ExecContext(ctxTimeout, "DELETE FROM provider_settings WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected == 0 {
+		return internal_errors.NewNotFoundError("provider setting is not found")
+	}
+
+	return nil
+}

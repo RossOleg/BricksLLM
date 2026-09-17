@@ -22,6 +22,7 @@ import (
 
 type ProviderSettingsManager interface {
 	GetSettings(withSecret bool, ids []string) ([]*provider.Setting, error)
+	DeleteSetting(id string) error
 	CreateSetting(setting *provider.Setting) (*provider.Setting, error)
 	UpdateSetting(id string, setting *provider.UpdateSetting) (*provider.Setting, error)
 	GetSettingViaCache(id string) (*provider.Setting, error)
@@ -116,6 +117,7 @@ func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReporting
 	router.PUT("/api/provider-settings", getCreateProviderSettingHandler(psm, prod))
 	router.GET("/api/provider-settings", getGetProviderSettingsHandler(psm, prod))
 	router.PATCH("/api/provider-settings/:id", getUpdateProviderSettingHandler(psm, prod))
+	router.DELETE("/api/provider-settings/:id", getDeleteProviderSettingHandler(psm, prod))
 
 	router.POST("/api/custom/providers", getCreateCustomProviderHandler(cpm, prod))
 	router.GET("/api/custom/providers", getGetCustomProvidersHandler(cpm, prod))
@@ -160,6 +162,7 @@ func (as *AdminServer) Run() {
 		as.log.Info("PORT 8001 | PUT    | /api/key-management/keys is set up for creating a key")
 		as.log.Info("PORT 8001 | PATCH  | /api/key-management/keys/:id is set up for updating a key using an id")
 		as.log.Info("PORT 8001 | GET    | /api/provider-settings is set up for getting provider settings")
+		as.log.Info("PORT 8001 | DELETE | /api/provider-settings/:id is set up for deleting a provider setting")
 		as.log.Info("PORT 8001 | PUT    | /api/provider-settings is set up for creating a provider setting")
 		as.log.Info("PORT 8001 | PATCH  | /api/provider-settings:id is set up for updating provider setting")
 		as.log.Info("PORT 8001 | POST   | /api/reporting/events is set up for retrieving api metrics")
@@ -634,6 +637,79 @@ func getCreateKeyHandler(m KeyManager, psm ProviderSettingsManager, supportSetti
 		telemetry.Incr("bricksllm.admin.get_create_key_handler.success", nil, 1)
 
 		c.JSON(http.StatusOK, resk)
+	}
+}
+
+// getDeleteProviderSettingHandler removes a provider setting.
+//
+// Upstream has no such endpoint - settings could only be created and updated, so
+// one created by accident stayed forever.
+func getDeleteProviderSettingHandler(m ProviderSettingsManager, prod bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log := util.GetLogFromCtx(c)
+		telemetry.Incr("bricksllm.admin.get_delete_provider_setting_handler.requests", nil, 1)
+
+		path := "/api/provider-settings/:id"
+
+		id := c.Param("id")
+		if len(id) == 0 {
+			c.JSON(http.StatusBadRequest, &ErrorResponse{
+				Type:     "/errors/missing-param-id",
+				Title:    "id is empty",
+				Status:   http.StatusBadRequest,
+				Detail:   "id url param is missing from the request url. it is required for deleting a provider setting.",
+				Instance: path,
+			})
+
+			return
+		}
+
+		if err := m.DeleteSetting(id); err != nil {
+			if _, ok := err.(notFoundError); ok {
+				telemetry.Incr("bricksllm.admin.get_delete_provider_setting_handler.not_found", nil, 1)
+
+				c.JSON(http.StatusNotFound, &ErrorResponse{
+					Type:     "/errors/provider-setting-not-found",
+					Title:    "provider setting is not found",
+					Status:   http.StatusNotFound,
+					Detail:   err.Error(),
+					Instance: path,
+				})
+
+				return
+			}
+
+			if _, ok := err.(validationError); ok {
+				telemetry.Incr("bricksllm.admin.get_delete_provider_setting_handler.in_use", nil, 1)
+
+				c.JSON(http.StatusBadRequest, &ErrorResponse{
+					Type:     "/errors/validation",
+					Title:    "provider setting cannot be deleted",
+					Status:   http.StatusBadRequest,
+					Detail:   err.Error(),
+					Instance: path,
+				})
+
+				return
+			}
+
+			telemetry.Incr("bricksllm.admin.get_delete_provider_setting_handler.error", nil, 1)
+
+			logError(log, "error when deleting a provider setting", prod, err)
+			c.JSON(http.StatusInternalServerError, &ErrorResponse{
+				Type:     "/errors/provider-settings-manager",
+				Title:    "deleting provider setting errored out",
+				Status:   http.StatusInternalServerError,
+				Detail:   err.Error(),
+				Instance: path,
+			})
+
+			return
+		}
+
+		telemetry.Incr("bricksllm.admin.get_delete_provider_setting_handler.success", nil, 1)
+
+		c.Status(http.StatusNoContent)
 	}
 }
 

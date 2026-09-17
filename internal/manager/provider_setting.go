@@ -20,6 +20,8 @@ type ProviderSettingsStorage interface {
 	GetProviderSetting(id string, withSecret bool) (*provider.Setting, error)
 	GetCustomProviderByName(name string) (*custom.Provider, error)
 	GetProviderSettings(withSecret bool, ids []string) ([]*provider.Setting, error)
+	CountKeysForProviderSetting(id string) (int, error)
+	DeleteProviderSetting(id string) error
 }
 
 type ProviderSettingsCache interface {
@@ -212,6 +214,40 @@ func (m *ProviderSettingsManager) UpdateSetting(id string, setting *provider.Upd
 	}
 
 	return m.Storage.UpdateProviderSetting(id, setting)
+}
+
+// DeleteSetting removes a provider setting, unless keys still point at it.
+//
+// A key whose setting has gone stops working with "not authorised", which reads
+// like a bad key and sends whoever debugs it in the wrong direction. So the
+// refusal says how many keys are in the way instead.
+//
+// The cache is cleared after the row, not before: a cold cache is harmless, a
+// cached setting whose row is gone is not.
+func (m *ProviderSettingsManager) DeleteSetting(id string) error {
+	if len(id) == 0 {
+		return internal_errors.NewValidationError("provider setting id is required")
+	}
+
+	used, err := m.Storage.CountKeysForProviderSetting(id)
+	if err != nil {
+		return err
+	}
+
+	if used > 0 {
+		return internal_errors.NewValidationError(
+			fmt.Sprintf("%d keys still use this provider setting, point them elsewhere or revoke them first", used))
+	}
+
+	if err := m.Storage.DeleteProviderSetting(id); err != nil {
+		return err
+	}
+
+	if err := m.Cache.Delete(id); err != nil {
+		return fmt.Errorf("the provider setting is deleted but stayed in the cache, it may answer for a little longer: %w", err)
+	}
+
+	return nil
 }
 
 func (m *ProviderSettingsManager) GetSettingViaCache(id string) (*provider.Setting, error) {
