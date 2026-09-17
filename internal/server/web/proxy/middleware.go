@@ -182,6 +182,14 @@ func getMiddleware(cpm CustomProvidersManager, rm routeManager, pm PoliciesManag
 			return
 		}
 
+		// The balance endpoints authenticate themselves: the shared pipeline resolves
+		// a provider setting for the path, and these belong to no provider. They are
+		// not calls to a model either, so they do not belong in the event log - the
+		// handlers are left to run on their own.
+		if c.FullPath() == "/api/usage" || c.FullPath() == "/api/credits" {
+			return
+		}
+
 		if removeUserAgent {
 			c.Set("removeUserAgent", removeUserAgent)
 		}

@@ -10,6 +10,7 @@ info:
 
 tags:
   - name: Health Check
+  - name: Usage
   - name: OpenAI
   - name: DeepInfra
   - name: vLLM
@@ -36,6 +37,102 @@ paths:
       responses:
         200:
           description: Service is up and running.
+
+  /api/usage:
+    get:
+      tags:
+        - Usage
+      summary: Key usage
+      description: >-
+        Returns the spend and the cost limit of the key that signs the request, in
+        dollars. The key authenticates itself through the same headers as a provider
+        call, and nothing about any other key is returned. It stays available when
+        `/api/credits` is configured: the balance of a key is not secret from whoever
+        holds that key.
+      responses:
+        200:
+          description: Usage of the key that signs the request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keyId:
+                    type: string
+                  name:
+                    type: string
+                  createdAt:
+                    type: integer
+                    format: int64
+                  spentInUsd:
+                    type: number
+                    description: Spend over the whole life of the key.
+                  costLimitInUsd:
+                    type: number
+                    description: Lifetime cost limit. 0 when the key has none.
+                  spentInUsdOverTime:
+                    type: number
+                    description: Spend within the current cost limit window. 0 when the key has no windowed limit.
+                  costLimitInUsdOverTime:
+                    type: number
+                    description: Cost limit per window. 0 when the key has none.
+                  costLimitInUsdUnit:
+                    type: string
+                    description: Length of the cost limit window, for example `d`, `h` or `m`. Empty when the key has no windowed limit.
+        401:
+          description: The api key is missing, unknown or revoked.
+        500:
+          description: The spend could not be read.
+
+  /api/credits:
+    get:
+      tags:
+        - Usage
+      summary: Key balance in credits
+      description: >-
+        Returns the same balance as `/api/usage` with the money taken out of it, for
+        clients that must not learn what a request costs. The conversion happens here
+        and its parameters (`CREDITS_PER_USD`, `CREDITS_EXPONENT`, `CREDITS_OFFSET`,
+        `CREDITS_STEP`) never appear in a response. The scale is deliberately not
+        proportional, so a single balance cannot be divided back into dollars. The
+        endpoint answers 404 when `CREDITS_PER_USD` is not set.
+      responses:
+        200:
+          description: Balance of the key that signs the request, in credits.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keyId:
+                    type: string
+                  name:
+                    type: string
+                  used:
+                    type: integer
+                    format: int64
+                    description: Credits spent, rounded up.
+                  limit:
+                    type: integer
+                    format: int64
+                    nullable: true
+                    description: Credit limit, rounded down. Null when the key has no limit.
+                  remaining:
+                    type: integer
+                    format: int64
+                    nullable: true
+                    description: Never below zero. Null when the key has no limit.
+                  limitUnit:
+                    type: string
+                    description: >-
+                      Empty when the limit covers the whole life of the key. Otherwise the
+                      window (`d`, `h`, `m`) the balance belongs to, which resets with it.
+        401:
+          description: The api key is missing, unknown or revoked.
+        404:
+          description: Credits are not configured on this gateway.
+        500:
+          description: The balance could not be read.
 
   /api/providers/openai/v1/chat/completions:
     post:

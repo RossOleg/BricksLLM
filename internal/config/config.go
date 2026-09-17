@@ -51,6 +51,15 @@ type Config struct {
 	DecryptionEndpoint            string        `koanf:"decryption_endpoint" env:"DECRYPTION_ENDPOINT"`
 	EncryptionTimeout             time.Duration `koanf:"encryption_timeout" env:"ENCRYPTION_TIMEOUT" envDefault:"5s"`
 	Audience                      string        `koanf:"audience" env:"AUDIENCE"`
+
+	// The scale that turns a key's spend into the credits /api/credits reports.
+	// CreditsPerUsd is what enables the endpoint at all; zero leaves it off. None
+	// of these ever appear in a response - see credits.go for what each one does
+	// and for what this kind of concealment is and is not worth.
+	CreditsPerUsd   float64 `koanf:"credits_per_usd" env:"CREDITS_PER_USD" envDefault:"0"`
+	CreditsExponent float64 `koanf:"credits_exponent" env:"CREDITS_EXPONENT" envDefault:"1"`
+	CreditsOffset   int64   `koanf:"credits_offset" env:"CREDITS_OFFSET" envDefault:"0"`
+	CreditsStep     int64   `koanf:"credits_step" env:"CREDITS_STEP" envDefault:"1"`
 }
 
 func prepareDotEnv(envFilePath string) error {

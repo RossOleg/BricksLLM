@@ -46,6 +46,7 @@ type recorder interface {
 
 type KeyManager interface {
 	GetKeys(tags, keyIds []string, provider string) ([]*key.ResponseKey, error)
+	GetKeyViaCache(raw string) (*key.ResponseKey, error)
 	UpdateKey(id string, key *key.UpdateKey) (*key.ResponseKey, error)
 	CreateKey(key *key.RequestKey) (*key.ResponseKey, error)
 	DeleteKey(id string) error
@@ -79,7 +80,7 @@ func CorsMiddleware() gin.HandlerFunc {
 	}
 }
 
-func NewProxyServer(log *zap.Logger, mode, privacyMode string, c cache, m KeyManager, rm routeManager, a authenticator, psm ProviderSettingsManager, cpm CustomProvidersManager, ks keyStorage, e estimator, ae anthropicEstimator, aoe azureEstimator, v validator, r recorder, pub publisher, rlm rateLimitManager, timeout time.Duration, ac accessCache, uac userAccessCache, pm PoliciesManager, scanner Scanner, cd CustomPolicyDetector, die deepinfraEstimator, um userManager, removeAgentHeaders bool) (*ProxyServer, error) {
+func NewProxyServer(log *zap.Logger, mode, privacyMode string, c cache, m KeyManager, rm routeManager, a authenticator, psm ProviderSettingsManager, cpm CustomProvidersManager, ks keyStorage, cs costStorage, clc costLimitCache, e estimator, ae anthropicEstimator, aoe azureEstimator, v validator, r recorder, pub publisher, rlm rateLimitManager, timeout time.Duration, ac accessCache, uac userAccessCache, pm PoliciesManager, scanner Scanner, cd CustomPolicyDetector, die deepinfraEstimator, um userManager, removeAgentHeaders bool, scale CreditsScale) (*ProxyServer, error) {
 	router := gin.New()
 	prod := mode == "production"
 	private := privacyMode == "strict"
@@ -95,6 +96,10 @@ func NewProxyServer(log *zap.Logger, mode, privacyMode string, c cache, m KeyMan
 
 	// health check
 	router.GET("/api/health", getGetHealthCheckHandler())
+
+	// balance of the key that signs the request, in dollars or in credits
+	router.GET("/api/usage", getUsageHandler(m, cs, clc))
+	router.GET("/api/credits", getCreditsHandler(m, cs, clc, scale))
 
 	// audios
 	router.POST("/api/providers/openai/v1/audio/speech", getSpeechHandler(prod, client))
@@ -919,6 +924,10 @@ func (ps *ProxyServer) Run() {
 
 		// health check
 		ps.log.Info("PORT 8002 | GET    | /api/health is ready")
+
+		// usage
+		ps.log.Info("PORT 8002 | GET    | /api/usage is ready for retrieving the spend and the cost limit of the key that signs the request")
+		ps.log.Info("PORT 8002 | GET    | /api/credits is ready for retrieving the same balance in credits")
 
 		// audio
 		ps.log.Info("PORT 8002 | POST   | /api/providers/openai/v1/audio/speech is ready for creating openai speeches")
