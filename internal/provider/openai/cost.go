@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/bricks-cloud/bricksllm/internal/util"
@@ -32,19 +33,72 @@ func parseFinetuneModel(model string) string {
 	return model
 }
 
+// OpenAiPerThousandTokenCost holds the price of a thousand tokens in USD, which
+// is the price per million from the OpenAI pricing page divided by a thousand.
+//
+// Only the standard, short context tier is kept here. The gateway sees neither
+// the service tier a request was routed through nor how much of the prompt was
+// served from cache, so a long context request (charged double from gpt-5.4 on)
+// is under counted and a request with a large cached prefix is over counted.
+// That is deliberate: the number has to follow from the token counts alone.
+//
+// Lookup is by exact model name, with a pinned snapshot falling back to its base
+// model - see lookupModelCost. A model missing from the maps costs nothing at
+// all in the accounting, which is the reason to keep them current.
+//
+// Prices taken from https://platform.openai.com/docs/pricing on 2026-09-17.
 var OpenAiPerThousandTokenCost = map[string]map[string]float64{
 	"prompt": {
-		"gpt-5.2":                     0.00175,
-		"gpt-5.1":                     0.00125,
-		"gpt-5":					   0.00125,
-		"gpt-5-mini":                  0.00025,
-		"gpt-5-nano":                  0.00005,
-		"o1":                          0.015,
+		// flagship
+		"gpt-6-astra":   0.01,
+		"gpt-5.6-sol":   0.004,
+		"gpt-5.6-terra": 0.002,
+		"gpt-5.6-luna":  0.0002,
+		"gpt-5.6-cyber": 0.0125,
+		"gpt-5.5":       0.005,
+		"gpt-5.5-pro":   0.03,
+		"gpt-5.4":       0.0025,
+		"gpt-5.4-pro":   0.03,
+		"gpt-5.4-mini":  0.00075,
+		"gpt-5.4-nano":  0.0002,
+		"gpt-5.2":       0.00175,
+		"gpt-5.2-pro":   0.021,
+		"gpt-5.1":       0.00125,
+		"gpt-5":         0.00125,
+		"gpt-5-mini":    0.00025,
+		"gpt-5-nano":    0.00005,
+		"gpt-5-pro":     0.015,
+
+		// Daybreak aliases: they follow whichever model the program points them
+		// at, so their price has to be revisited together with that model.
+		"gpt-daybreak-blue-latest": 0.004,
+		"gpt-daybreak-red-latest":  0.0125,
+
+		// specialized
+		"chat-latest":      0.005,
+		"gpt-5.3-codex":    0.00175,
+		"gpt-5-search-api": 0.00125,
+
+		// still sold, earlier generations
+		"gpt-4.1":      0.002,
+		"gpt-4.1-mini": 0.0004,
+		"gpt-4.1-nano": 0.0001,
+		"gpt-4o":       0.0025,
+		"gpt-4o-mini":  0.00015,
+		"o4-mini":      0.0011,
+		"o3":           0.002,
+		"o3-mini":      0.0011,
+		"o3-pro":       0.02,
+		"o1":           0.015,
+		"o1-pro":       0.15,
+		"davinci-002":  0.002,
+		"babbage-002":  0.0004,
+
+		// retired models and pinned snapshots, kept so that a request to one of
+		// them is still priced rather than counted as free
 		"o1-2024-12-17":               0.015,
 		"o1-preview":                  0.015,
 		"o1-preview-2024-09-12":       0.015,
-		"gpt-4o":                      0.0025,
-		"gpt-4o-mini":                 0.00015,
 		"gpt-4o-mini-2024-07-18":      0.00015,
 		"gpt-4o-2024-05-13":           0.005,
 		"gpt-4o-2024-08-06":           0.0025,
@@ -61,7 +115,7 @@ var OpenAiPerThousandTokenCost = map[string]map[string]float64{
 		"gpt-4-32k":                   0.06,
 		"gpt-4-32k-0613":              0.06,
 		"gpt-4-32k-0314":              0.06,
-		"gpt-3.5-turbo":               0.0015,
+		"gpt-3.5-turbo":               0.0005,
 		"gpt-3.5-turbo-1106":          0.001,
 		"gpt-3.5-turbo-0125":          0.0005,
 		"gpt-3.5-turbo-0301":          0.0015,
@@ -87,6 +141,7 @@ var OpenAiPerThousandTokenCost = map[string]map[string]float64{
 		"finetune-davinci-002":        0.012,
 	},
 	"finetune": {
+		// training, priced per thousand tokens of the training file
 		"gpt-4-0613":         0.09,
 		"gpt-3.5-turbo-0125": 0.008,
 		"gpt-3.5-turbo-1106": 0.008,
@@ -100,23 +155,66 @@ var OpenAiPerThousandTokenCost = map[string]map[string]float64{
 		"text-embedding-3-large": 0.00013,
 	},
 	"audio": {
-		"whisper-1": 0.006,
-		"tts-1":     0.015,
-		"tts-1-hd":  0.03,
+		// transcription and translation, priced per minute of audio
+		"whisper-1":                 0.006,
+		"gpt-transcribe":            0.0045,
+		"gpt-4o-transcribe":         0.006,
+		"gpt-4o-transcribe-diarize": 0.006,
+		"gpt-4o-mini-transcribe":    0.003,
+
+		// speech, priced per thousand characters of input
+		"tts-1":    0.015,
+		"tts-1-hd": 0.03,
 	},
 	"completion": {
-		"gpt-5.2":                     0.014,
-		"gpt-5.1":                     0.01,
-		"gpt-5":					   0.01,
-		"gpt-5-mini":                  0.002,
-		"gpt-5-nano":                  0.0004,
-		"o1":                          0.06,
+		// flagship
+		"gpt-6-astra":   0.05,
+		"gpt-5.6-sol":   0.02,
+		"gpt-5.6-terra": 0.012,
+		"gpt-5.6-luna":  0.0012,
+		"gpt-5.6-cyber": 0.075,
+		"gpt-5.5":       0.03,
+		"gpt-5.5-pro":   0.18,
+		"gpt-5.4":       0.015,
+		"gpt-5.4-pro":   0.18,
+		"gpt-5.4-mini":  0.0045,
+		"gpt-5.4-nano":  0.00125,
+		"gpt-5.2":       0.014,
+		"gpt-5.2-pro":   0.168,
+		"gpt-5.1":       0.01,
+		"gpt-5":         0.01,
+		"gpt-5-mini":    0.002,
+		"gpt-5-nano":    0.0004,
+		"gpt-5-pro":     0.12,
+
+		// Daybreak aliases
+		"gpt-daybreak-blue-latest": 0.02,
+		"gpt-daybreak-red-latest":  0.075,
+
+		// specialized
+		"chat-latest":      0.03,
+		"gpt-5.3-codex":    0.014,
+		"gpt-5-search-api": 0.01,
+
+		// still sold, earlier generations
+		"gpt-4.1":      0.008,
+		"gpt-4.1-mini": 0.0016,
+		"gpt-4.1-nano": 0.0004,
+		"gpt-4o":       0.01,
+		"gpt-4o-mini":  0.0006,
+		"o4-mini":      0.0044,
+		"o3":           0.008,
+		"o3-mini":      0.0044,
+		"o3-pro":       0.08,
+		"o1":           0.06,
+		"o1-pro":       0.6,
+		"davinci-002":  0.002,
+		"babbage-002":  0.0004,
+
+		// retired models and pinned snapshots
 		"o1-2024-12-17":               0.06,
 		"o1-preview":                  0.06,
 		"o1-preview-2024-09-12":       0.06,
-		"gpt-3.5-turbo-1106":          0.002,
-		"gpt-4o":                      0.01,
-		"gpt-4o-mini":                 0.0006,
 		"gpt-4o-mini-2024-07-18":      0.0006,
 		"gpt-4o-2024-05-13":           0.015,
 		"gpt-4o-2024-08-06":           0.01,
@@ -133,7 +231,8 @@ var OpenAiPerThousandTokenCost = map[string]map[string]float64{
 		"gpt-4-32k":                   0.12,
 		"gpt-4-32k-0613":              0.12,
 		"gpt-4-32k-0314":              0.12,
-		"gpt-3.5-turbo":               0.002,
+		"gpt-3.5-turbo":               0.0015,
+		"gpt-3.5-turbo-1106":          0.002,
 		"gpt-3.5-turbo-0125":          0.0015,
 		"gpt-3.5-turbo-0301":          0.002,
 		"gpt-3.5-turbo-0613":          0.002,
@@ -147,6 +246,32 @@ var OpenAiPerThousandTokenCost = map[string]map[string]float64{
 		"finetune-babbage-002":        0.0016,
 		"finetune-davinci-002":        0.012,
 	},
+}
+
+// datedSnapshot matches the suffix OpenAI appends to a pinned model release,
+// e.g. gpt-5.4-2026-03-05 or gpt-3.5-turbo-0125.
+var datedSnapshot = regexp.MustCompile(`-(\d{4}-\d{2}-\d{2}|\d{4})$`)
+
+// lookupModelCost resolves the price of a model in one of the maps above. An
+// exact match wins, so a snapshot that OpenAI prices on its own (gpt-4o-2024-05-13)
+// keeps that price; anything else pinned falls back to its base model, which is
+// what OpenAI charges for it anyway. Without the fallback a newly pinned snapshot
+// would quietly be recorded as free.
+func lookupModelCost(costMap map[string]float64, model string) (float64, bool) {
+	normalized := useFinetuneModel(model)
+
+	if cost, ok := costMap[normalized]; ok {
+		return cost, true
+	}
+
+	trimmed := datedSnapshot.ReplaceAllString(normalized, "")
+	if trimmed != normalized {
+		if cost, ok := costMap[trimmed]; ok {
+			return cost, true
+		}
+	}
+
+	return 0, false
 }
 
 type tokenCounter interface {
@@ -186,7 +311,7 @@ func (ce *CostEstimator) EstimatePromptCost(model string, tks int) (float64, err
 
 	}
 
-	cost, ok := costMap[useFinetuneModel(model)]
+	cost, ok := lookupModelCost(costMap, model)
 	if !ok {
 		return 0, fmt.Errorf("%s is not present in the cost map provided", model)
 	}
@@ -217,7 +342,7 @@ func (ce *CostEstimator) EstimateCompletionCost(model string, tks int) (float64,
 		return 0, errors.New("prompt token cost is not provided")
 	}
 
-	cost, ok := costMap[useFinetuneModel(model)]
+	cost, ok := lookupModelCost(costMap, model)
 	if !ok {
 		return 0, errors.New("model is not present in the cost map provided")
 	}

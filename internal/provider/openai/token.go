@@ -29,7 +29,14 @@ func (tc *TokenCounter) Count(model string, input string) (int, error) {
 
 	encoder, err = tiktoken.EncodingForModel(model)
 	if err != nil {
-		return 0, err
+		// tiktoken-go knows model names only up to gpt-4o. Everything released
+		// after it uses the o200k_base vocabulary, and falling back to it is far
+		// better than failing the count: a failed count is recorded as no cost
+		// at all, so a new model would spend the key's budget for free.
+		encoder, err = tiktoken.GetEncoding(tiktoken.MODEL_O200K_BASE)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	token := encoder.Encode(input, nil, nil)
