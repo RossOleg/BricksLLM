@@ -335,7 +335,10 @@ paths:
       tags:
         - Events
       summary: Get events
-      description: This endpoint is for getting events based on query parameters.
+      description: >-
+        This endpoint is for getting events based on query parameters. The events come
+        back without their `request` and `response` bodies - those hold whole provider
+        payloads and are fetched one event at a time from `/api/events/{id}`.
       parameters:
         - in: query
           example: customId
@@ -453,6 +456,84 @@ paths:
       responses:
         200:
           description: Created custom provider.
+    delete:
+      tags:
+        - Events
+      summary: Delete events
+      description: >-
+        This endpoint deletes the events created within a time range, both ends
+        included. Both `start` and `end` are required and have no default, so a
+        forgotten parameter cannot empty the table. Deletion runs in batches and
+        is resumable: a call that is interrupted keeps what it already removed,
+        and calling it again carries on. Disk space returns as autovacuum reclaims
+        the rows, not immediately.
+      parameters:
+        - in: query
+          required: true
+          name: start
+          schema:
+            type: integer
+          example: 1718581437
+          description: Start timestamp, inclusive.
+        - in: query
+          required: true
+          name: end
+          schema:
+            type: integer
+          example: 1718581437
+          description: End timestamp, inclusive.
+      responses:
+        200:
+          description: How many events were deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                    format: int64
+        400:
+          description: A timestamp is missing, malformed, or start is larger than end.
+        500:
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalError"
+
+  /api/events/{id}:
+    get:
+      tags:
+        - Events
+      summary: Get one event
+      description: >-
+        This endpoint returns a single event together with its `request` and `response`
+        bodies, which the event lists leave out.
+      parameters:
+        - in: path
+          required: true
+          name: id
+          schema:
+            type: string
+          example: 98daa3ae-961d-4253-bf6a-322a32fdca3d
+          description: Identifier of the event.
+      responses:
+        200:
+          description: The event, with its request and response bodies.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        404:
+          description: The event is not found.
+        500:
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalError"
+
           content:
             application/json:
               schema:

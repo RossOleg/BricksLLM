@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"strings"
 
 	internal_errors "github.com/bricks-cloud/bricksllm/internal/errors"
@@ -18,6 +19,8 @@ type keyStorage interface {
 
 type eventStorage interface {
 	GetEvents(userId, customId string, keyIds []string, start, end int64) ([]*event.Event, error)
+	GetEventByID(id string) (*event.Event, error)
+	DeleteEvents(ctx context.Context, start, end int64) (int64, error)
 	GetEventsV2(req *event.EventRequest) (*event.EventResponse, error)
 	GetEventDataPoints(start, end, increment int64, tags, keyIds, customIds, userIds []string, filters []string) ([]*event.DataPoint, error)
 	GetLatencyPercentiles(start, end int64, tags, keyIds []string) ([]float64, error)
@@ -141,6 +144,18 @@ func (rm *ReportingManager) GetEvents(userId, customId string, keyIds []string, 
 	}
 
 	return events, nil
+}
+
+// GetEventByID returns one event with its request and response bodies, which the
+// lists leave out.
+func (rm *ReportingManager) GetEventByID(id string) (*event.Event, error) {
+	return rm.es.GetEventByID(id)
+}
+
+// DeleteEvents removes the request history of a time range and returns how many
+// events were deleted.
+func (rm *ReportingManager) DeleteEvents(ctx context.Context, start, end int64) (int64, error) {
+	return rm.es.DeleteEvents(ctx, start, end)
 }
 
 func (rm *ReportingManager) GetEventsV2(req *event.EventRequest) (*event.EventResponse, error) {

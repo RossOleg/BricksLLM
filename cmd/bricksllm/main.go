@@ -112,6 +112,11 @@ func main() {
 		log.Sugar().Fatalf("error altering events table: %v", err)
 	}
 
+	err = store.CreateIndexesForEventsTable()
+	if err != nil {
+		log.Sugar().Fatalf("error creating indexes for events table: %v", err)
+	}
+
 	err = store.CreateProviderSettingsTable()
 	if err != nil {
 		log.Sugar().Fatalf("error creating provider settings table: %v", err)
@@ -132,17 +137,17 @@ func main() {
 		log.Sugar().Fatalf("error creating event aggregated by day table: %v", err)
 	}
 
-	err = store.CreateUniqueIndexForEventsTable()
+	err = store.CreateUniqueIndexForEventsByDayTable()
 	if err != nil {
 		log.Sugar().Fatalf("error creating unique index for event aggregated by day table: %v", err)
 	}
 
-	err = store.CreateTimeStampIndexForEventsTable()
+	err = store.CreateTimeStampIndexForEventsByDayTable()
 	if err != nil {
 		log.Sugar().Fatalf("error creating time stamp index for event aggregated by day table: %v", err)
 	}
 
-	err = store.CreateKeyIdIndexForEventsTable()
+	err = store.CreateKeyIdIndexForEventsByDayTable()
 	if err != nil {
 		log.Sugar().Fatalf("error creating key id index for event aggregated by day table: %v", err)
 	}
