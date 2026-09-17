@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useApi } from "@/hooks/useApi";
 import { PageHeader, EmptyState, StatusBadge } from "@/components/ui/page-helpers";
 import { Button } from "@/components/ui/button";
@@ -6,26 +6,45 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Loader2 } from "lucide-react";
+import { Users, Plus, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 
 const UsersPage: React.FC = () => {
   const api = useApi();
   const [users, setUsers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [filter, setFilter] = useState({ tag: "", userId: "" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", userId: "", tags: "", costLimitInUsd: "" });
 
+  // Список пользователей нельзя получить целиком: эндпоинт требует хотя бы один
+  // фильтр - tags, userIds или keyIds - и без него отвечает 400. Раньше страница
+  // звала его без параметров и всегда падала на этой ошибке.
   const fetchData = async () => {
     if (!api) return;
-    setLoading(true);
-    try { setUsers(await api.listUsers() || []); }
-    catch (e: any) { toast.error(e.message); }
-    finally { setLoading(false); }
-  };
 
-  useEffect(() => { fetchData(); }, [api]);
+    const params: Record<string, string> = {};
+    if (filter.tag.trim()) params.tags = filter.tag.trim();
+    if (filter.userId.trim()) params.userIds = filter.userId.trim();
+
+    if (Object.keys(params).length === 0) {
+      toast.error("Enter a tag or a user id to search");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const list = await api.listUsers(params);
+      setUsers(Array.isArray(list) ? list : []);
+      setSearched(true);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!api) return;
@@ -37,7 +56,7 @@ const UsersPage: React.FC = () => {
       toast.success("User created");
       setDialogOpen(false);
       setForm({ name: "", userId: "", tags: "", costLimitInUsd: "" });
-      fetchData();
+      if (searched) fetchData();
     } catch (e: any) { toast.error(e.message); }
   };
 
@@ -59,11 +78,37 @@ const UsersPage: React.FC = () => {
         </Dialog>
       </PageHeader>
 
-      <div className="p-6">
+      <div className="p-6 space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <Label className="text-xs">Tag</Label>
+            <Input
+              className="mt-1 w-44"
+              value={filter.tag}
+              onChange={(e) => setFilter((p) => ({ ...p, tag: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && fetchData()}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">User ID</Label>
+            <Input
+              className="mt-1 w-56 font-mono text-sm"
+              value={filter.userId}
+              onChange={(e) => setFilter((p) => ({ ...p, userId: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && fetchData()}
+            />
+          </div>
+          <Button onClick={fetchData} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Search className="mr-1.5 h-3.5 w-3.5" /> Search</>}
+          </Button>
+        </div>
+
         {loading ? (
           <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : !searched ? (
+          <EmptyState icon={<Users className="h-6 w-6" />} title="Search for users" description="This endpoint needs a tag or a user id - it cannot list everyone" />
         ) : users.length === 0 ? (
-          <EmptyState icon={<Users className="h-6 w-6" />} title="No users" description="Create your first user to get started" />
+          <EmptyState icon={<Users className="h-6 w-6" />} title="No users found" description="Nothing matches this filter" />
         ) : (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-xl border border-border overflow-hidden">
             <Table>

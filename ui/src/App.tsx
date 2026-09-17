@@ -9,7 +9,6 @@ import LoginPage from "@/pages/LoginPage";
 import KeysPage from "@/pages/KeysPage";
 import ProviderSettingsPage from "@/pages/ProviderSettingsPage";
 import UsersPage from "@/pages/UsersPage";
-import EventsPage from "@/pages/EventsPage";
 import ReportingPage from "@/pages/ReportingPage";
 import TopKeysPage from "@/pages/TopKeysPage";
 import RoutesPage from "@/pages/RoutesPage";
@@ -44,7 +43,6 @@ const ProtectedRoutes = () => {
         <Route path="keys" element={<KeysPage />} />
         <Route path="provider-settings" element={<ProviderSettingsPage />} />
         <Route path="users" element={<UsersPage />} />
-        <Route path="events" element={<EventsPage />} />
         <Route path="reporting" element={<ReportingPage />} />
         <Route path="top-keys" element={<TopKeysPage />} />
         <Route path="routes" element={<RoutesPage />} />

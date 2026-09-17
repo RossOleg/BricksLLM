@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Copy, Settings, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { rememberSetting, recallSetting } from "@/lib/defaultSetting";
 
 const PROVIDERS = ["openai", "anthropic", "azure", "vllm", "deepinfra"];
 
@@ -35,6 +36,7 @@ const ProviderSettingsPage: React.FC = () => {
   const [editing, setEditing] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({ name: "", allowedModels: "", apikey: "" });
   const [saving, setSaving] = useState(false);
+  const [defaultId, setDefaultId] = useState(recallSetting());
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -42,7 +44,16 @@ const ProviderSettingsPage: React.FC = () => {
     setLoading(true);
     try {
       const list = await api.listProviderSettings();
-      setSettings(Array.isArray(list) ? list : []);
+      const available = Array.isArray(list) ? list : [];
+      setSettings(available);
+
+      // Запомненная настройка могла исчезнуть; единственную выбираем сами.
+      setDefaultId((current) => {
+        if (current && available.some((s: any) => s.id === current)) return current;
+        const only = available.length === 1 ? available[0].id : "";
+        if (only) rememberSetting(only);
+        return only;
+      });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -195,6 +206,7 @@ const ProviderSettingsPage: React.FC = () => {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-12">Default</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Provider</TableHead>
                   <TableHead>ID</TableHead>
@@ -205,6 +217,20 @@ const ProviderSettingsPage: React.FC = () => {
               <TableBody>
                 {settings.map((s: any) => (
                   <TableRow key={s.id}>
+                    <TableCell>
+                      <input
+                        type="radio"
+                        name="default-provider-setting"
+                        className="h-4 w-4 accent-primary"
+                        checked={defaultId === s.id}
+                        onChange={() => {
+                          setDefaultId(s.id);
+                          rememberSetting(s.id);
+                          toast.success("New keys will use this provider setting");
+                        }}
+                        title="Use this setting for new keys"
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{s.name || "—"}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{s.provider}</Badge>
@@ -235,6 +261,15 @@ const ProviderSettingsPage: React.FC = () => {
             </Table>
           </motion.div>
         )}
+      </div>
+
+      <div className="px-6 pb-6">
+        <p className="text-xs text-muted-foreground">
+          The radio picks the setting new keys are created against. It is remembered in this browser
+          and is a convenience, not a rule: for a support session the server decides, from
+          SUPPORT_SETTING_ID or from the only setting there is. With more than one setting and no
+          SUPPORT_SETTING_ID a support session is refused, and told so.
+        </p>
       </div>
 
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>

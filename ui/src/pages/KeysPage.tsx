@@ -4,6 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import CreatedKeyDialog from "@/components/CreatedKeyDialog";
 import KeyDialog from "@/components/KeyDialog";
 import { downloadCsv } from "@/lib/csv";
+// Ключ обязан назвать настройку провайдера, через которую пойдут его запросы.
+import { rememberSetting, recallSetting } from "@/lib/defaultSetting";
 import { PageHeader, StatusBadge, EmptyState } from "@/components/ui/page-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,18 +24,7 @@ const AVAILABLE_TAGS = ["client", "daminion", "trial", "newyearevent"];
 // Здесь это только подпись на форме - решает сервер, он же и проставляет тег.
 const SUPPORT_TAG = "client";
 
-// Ключ обязан назвать настройку провайдера, через которую пойдут его запросы.
-// Раньше id был вписан в код одной строкой; теперь он выбирается, а последний
-// выбор запоминается, чтобы не тыкать его каждый раз.
-const SETTING_STORAGE_KEY = "bricks_setting_id";
 
-function rememberSetting(id: string) {
-  try { localStorage.setItem(SETTING_STORAGE_KEY, id); } catch { /* приватное окно */ }
-}
-
-function recallSetting(): string {
-  try { return localStorage.getItem(SETTING_STORAGE_KEY) || ""; } catch { return ""; }
-}
 
 function generateKey() {
   const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {

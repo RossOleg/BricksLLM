@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  KeyRound, Settings, Users, Activity, BarChart3,
+  KeyRound, Settings, Users, BarChart3,
   Globe, Shield, GitBranch, LogOut, Cpu, Lock, TrendingUp
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,6 @@ const navItems = [
   { to: "/keys", label: "Keys", icon: KeyRound, supportOnly: true },
   { to: "/provider-settings", label: "Providers", supportOnly: false, icon: Settings },
   { to: "/users", label: "Users", supportOnly: false, icon: Users },
-  { to: "/events", label: "Events", supportOnly: false, icon: Activity },
   { to: "/reporting", label: "Reporting", supportOnly: false, icon: BarChart3 },
   { to: "/top-keys", label: "Top keys", supportOnly: false, icon: TrendingUp },
   { to: "/routes", label: "Routes", supportOnly: false, icon: GitBranch },

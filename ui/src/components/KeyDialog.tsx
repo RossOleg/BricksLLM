@@ -35,6 +35,7 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({ name: "", costLimitInUsd: "", revoked: false });
+  const [tab, setTab] = useState("edit");
 
   useEffect(() => {
     if (!apiKey) return;
@@ -46,7 +47,8 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
     });
     setSpend(null);
     setEvents([]);
-  }, [apiKey]);
+    setTab(isFull ? "edit" : "info");
+  }, [apiKey, isFull]);
 
   // Расход берётся из счётчика, по которому шлюз гасит ключ на лимите - он же
   // переживает чистку истории событий.
@@ -87,6 +89,10 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
       setLoadingEvents(false);
     }
   }, [api, apiKey?.keyId]);
+
+  useEffect(() => {
+    if (tab === "events") loadEvents();
+  }, [tab, loadEvents]);
 
   const save = async () => {
     if (!api || !apiKey?.keyId) return;
@@ -143,14 +149,12 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
           </div>
         </div>
 
-        <Tabs defaultValue={isFull ? "edit" : "info"}>
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             {isFull && <TabsTrigger value="edit">Edit</TabsTrigger>}
             {!isFull && <TabsTrigger value="info">Details</TabsTrigger>}
             {isFull && (
-              <TabsTrigger value="events" onClick={loadEvents}>
-                Events
-              </TabsTrigger>
+              <TabsTrigger value="events">Events</TabsTrigger>
             )}
           </TabsList>
 
