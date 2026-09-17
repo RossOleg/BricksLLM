@@ -84,4 +84,7 @@ export class BricksApi {
   // Reporting
   getMetrics(data: any) { return this.request<any>("POST", "/api/reporting/events", data); }
   getTopKeys(data: any) { return this.request<any>("POST", "/api/reporting/top-keys", data); }
+  /** Расход нескольких ключей одним запросом: тот же счётчик, по которому гасится лимит. */
+  getKeysSpend(keyIds: string[]) { return this.request<any[]>("POST", "/api/reporting/keys", { keyIds }); }
+  getKeySpend(keyId: string) { return this.request<any>("GET", `/api/reporting/keys/${keyId}`); }
 }

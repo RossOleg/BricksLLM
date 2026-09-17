@@ -41,6 +41,7 @@ type KeyReportingManager interface {
 	GetKeyReporting(keyId string) (*key.KeyReporting, error)
 	GetEvents(userId, customId string, keyIds []string, start int64, end int64) ([]*event.Event, error)
 	GetEventByID(id string) (*event.Event, error)
+	GetKeysReporting(keyIds []string) ([]*key.KeyReporting, error)
 	DeleteEvents(ctx context.Context, start, end int64) (int64, error)
 	GetEventsV2(r *event.EventRequest) (*event.EventResponse, error)
 	GetEventReporting(e *event.ReportingRequest) (*event.ReportingResponse, error)
@@ -100,6 +101,7 @@ func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReporting
 	router.DELETE("/api/key-management/keys/:id", getDeleteKeyHandler(m, prod))
 
 	router.GET("/api/reporting/keys/:id", getGetKeyReportingHandler(krm, prod))
+	router.POST("/api/reporting/keys", getGetKeysReportingHandler(krm, prod))
 	router.POST("/api/reporting/events", getGetEventMetricsHandler(krm, prod))
 	router.POST("/api/reporting/events-by-day", getGetEventMetricsByDayHandler(krm, prod))
 	router.GET("/api/events", getGetEventsHandler(krm, prod))

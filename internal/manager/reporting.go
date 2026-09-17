@@ -137,6 +137,33 @@ func (rm *ReportingManager) GetKeyReporting(keyId string) (*key.KeyReporting, er
 	}, err
 }
 
+// GetKeysReporting answers what several keys have spent, in one call.
+//
+// The number comes from the same counter the gateway enforces the cost limit
+// against, which is also what survives a cleanup of the event history - unlike
+// anything computed from the events themselves.
+func (rm *ReportingManager) GetKeysReporting(keyIds []string) ([]*key.KeyReporting, error) {
+	reports := make([]*key.KeyReporting, 0, len(keyIds))
+
+	for _, keyId := range keyIds {
+		if len(keyId) == 0 {
+			continue
+		}
+
+		micros, err := rm.cs.GetCounter(keyId)
+		if err != nil {
+			return nil, err
+		}
+
+		reports = append(reports, &key.KeyReporting{
+			Id:                 keyId,
+			CostInMicroDollars: micros,
+		})
+	}
+
+	return reports, nil
+}
+
 func (rm *ReportingManager) GetEvents(userId, customId string, keyIds []string, start, end int64) ([]*event.Event, error) {
 	events, err := rm.es.GetEvents(userId, customId, keyIds, start, end)
 	if err != nil {

@@ -404,6 +404,45 @@ paths:
         401:
           description: There is no valid session.
 
+  /api/reporting/keys:
+    post:
+      tags:
+        - Events
+      summary: Spend of several keys
+      description: >-
+        Reports what each of the given keys has spent, so that a list of keys
+        needs one request rather than one per row. The figure comes from the
+        counter the gateway enforces the cost limit against, which is also what
+        survives a cleanup of the event history - unlike anything computed from
+        the events themselves. At most 200 ids per call.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keyIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        200:
+          description: One entry per key id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    costInMicroDollars:
+                      type: integer
+                      format: int64
+        400:
+          description: keyIds is missing, empty, or longer than 200.
+
   /api/events:
     get:
       tags:

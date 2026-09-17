@@ -35,6 +35,7 @@ var supportRoutes = map[string]bool{
 	"GET /api/key-management/keys":     true,
 	"POST /api/v2/key-management/keys": true,
 	"GET /api/reporting/keys/:id":      true,
+	"POST /api/reporting/keys":         true,
 }
 
 func supportMayCall(method, route string) bool {

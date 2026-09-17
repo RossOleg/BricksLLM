@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   KeyRound, Settings, Users, Activity, BarChart3,
-  Globe, Shield, GitBranch, LogOut, Cpu, Lock
+  Globe, Shield, GitBranch, LogOut, Cpu, Lock, TrendingUp
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import UnlockDialog from "@/components/UnlockDialog";
@@ -16,6 +16,7 @@ const navItems = [
   { to: "/users", label: "Users", supportOnly: false, icon: Users },
   { to: "/events", label: "Events", supportOnly: false, icon: Activity },
   { to: "/reporting", label: "Reporting", supportOnly: false, icon: BarChart3 },
+  { to: "/top-keys", label: "Top keys", supportOnly: false, icon: TrendingUp },
   { to: "/routes", label: "Routes", supportOnly: false, icon: GitBranch },
   { to: "/custom-providers", label: "Custom Providers", supportOnly: false, icon: Globe },
   { to: "/policies", label: "Policies", supportOnly: false, icon: Shield },

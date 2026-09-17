@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -522,5 +523,82 @@ func getGetEventsV2Handler(m KeyReportingManager, prod bool) gin.HandlerFunc {
 
 		telemetry.Incr("bricksllm.admin.get_get_events_v2_handler.success", nil, 1)
 		c.JSON(http.StatusOK, keys)
+	}
+}
+
+// keysReportingLimit caps one request, so that a single call cannot be turned
+// into a sweep of every key on the gateway.
+const keysReportingLimit = 200
+
+// KeysReportingRequest asks what a set of keys has spent.
+type KeysReportingRequest struct {
+	KeyIds []string `json:"keyIds"`
+}
+
+// getGetKeysReportingHandler reports the spend of several keys at once, so that a
+// list of them needs one request rather than one per row.
+func getGetKeysReportingHandler(m KeyReportingManager, prod bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log := util.GetLogFromCtx(c)
+		telemetry.Incr("bricksllm.admin.get_get_keys_reporting_handler.requests", nil, 1)
+
+		path := "/api/reporting/keys"
+
+		request := &KeysReportingRequest{}
+		if err := c.ShouldBindJSON(request); err != nil {
+			c.JSON(http.StatusBadRequest, &ErrorResponse{
+				Type:     "/errors/request-body-read",
+				Title:    "request body cannot be parsed",
+				Status:   http.StatusBadRequest,
+				Detail:   "the body must be a json object with a keyIds array",
+				Instance: path,
+			})
+
+			return
+		}
+
+		if len(request.KeyIds) == 0 {
+			c.JSON(http.StatusBadRequest, &ErrorResponse{
+				Type:     "/errors/validation",
+				Title:    "keyIds is empty",
+				Status:   http.StatusBadRequest,
+				Detail:   "at least one key id is required",
+				Instance: path,
+			})
+
+			return
+		}
+
+		if len(request.KeyIds) > keysReportingLimit {
+			c.JSON(http.StatusBadRequest, &ErrorResponse{
+				Type:     "/errors/validation",
+				Title:    "too many key ids",
+				Status:   http.StatusBadRequest,
+				Detail:   fmt.Sprintf("at most %d key ids can be asked about at once", keysReportingLimit),
+				Instance: path,
+			})
+
+			return
+		}
+
+		reports, err := m.GetKeysReporting(request.KeyIds)
+		if err != nil {
+			telemetry.Incr("bricksllm.admin.get_get_keys_reporting_handler.error", nil, 1)
+
+			logError(log, "error when getting key reporting", prod, err)
+			c.JSON(http.StatusInternalServerError, &ErrorResponse{
+				Type:     "/errors/key-reporting-manager",
+				Title:    "getting key reporting errored out",
+				Status:   http.StatusInternalServerError,
+				Detail:   err.Error(),
+				Instance: path,
+			})
+
+			return
+		}
+
+		telemetry.Incr("bricksllm.admin.get_get_keys_reporting_handler.success", nil, 1)
+
+		c.JSON(http.StatusOK, reports)
 	}
 }

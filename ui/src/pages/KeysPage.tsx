@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useApi } from "@/hooks/useApi";
 import { useAuth } from "@/contexts/AuthContext";
 import CreatedKeyDialog from "@/components/CreatedKeyDialog";
+import KeyDialog from "@/components/KeyDialog";
+import { downloadCsv } from "@/lib/csv";
 import { PageHeader, StatusBadge, EmptyState } from "@/components/ui/page-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,6 +108,9 @@ const KeysPage: React.FC = () => {
   const [searched, setSearched] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [openKey, setOpenKey] = useState<any | null>(null);
+  // keyId -> потрачено в долларах; один запрос на весь показанный список.
+  const [spend, setSpend] = useState<Record<string, number>>({});
 
   // Search
   const [searchTag, setSearchTag] = useState("");
@@ -166,8 +171,22 @@ const KeysPage: React.FC = () => {
       const data = await api.listKeys(body);
       // Этот эндпоинт отдаёт { keys, count }, а не голый массив - в отличие от
       // остальных списков панели.
-      setKeys(Array.isArray(data) ? data : data?.keys ?? []);
+      const list = Array.isArray(data) ? data : data?.keys ?? [];
+      setKeys(list);
       setSearched(true);
+
+      const ids = list.map((k: any) => k.keyId).filter(Boolean);
+      if (ids.length) {
+        try {
+          const reports = await api.getKeysSpend(ids);
+          const map: Record<string, number> = {};
+          for (const r of reports || []) map[r.id] = (r.costInMicroDollars ?? 0) / 1000000;
+          setSpend(map);
+        } catch {
+          // Расход - дополнение к списку: без него таблица остаётся полезной.
+          setSpend({});
+        }
+      }
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -375,6 +394,8 @@ const KeysPage: React.FC = () => {
         </Dialog>
       </PageHeader>
 
+      <KeyDialog apiKey={openKey} onClose={() => setOpenKey(null)} onSaved={fetchKeys} />
+
       <CreatedKeyDialog
         value={createdKey}
         onClose={() => {
@@ -407,6 +428,28 @@ const KeysPage: React.FC = () => {
           </Button>
         </div>
 
+        {searched && keys.length > 0 && (
+          <div className="mb-3 flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                downloadCsv("keys", keys, [
+                  { header: "Name", value: (k: any) => k.name },
+                  { header: "Key", value: (k: any) => k.key },
+                  { header: "Key id", value: (k: any) => k.keyId },
+                  { header: "Tags", value: (k: any) => k.tags?.join(" ") },
+                  { header: "Spent USD", value: (k: any) => spend[k.keyId] },
+                  { header: "Limit USD", value: (k: any) => k.costLimitInUsd },
+                  { header: "Status", value: (k: any) => (k.revoked ? "revoked" : "active") },
+                ])
+              }
+            >
+              Export CSV
+            </Button>
+          </div>
+        )}
+
         {!searched ? (
           <EmptyState icon={<KeyRound className="h-6 w-6" />} title="Search for keys" description="Enter a tag or name to find keys" />
         ) : keys.length === 0 ? (
@@ -419,6 +462,7 @@ const KeysPage: React.FC = () => {
                   <TableHead>Name</TableHead>
                   <TableHead>Key</TableHead>
                   <TableHead>Tags</TableHead>
+                  <TableHead>Spent</TableHead>
                   <TableHead>Limit (USD)</TableHead>
                   <TableHead>Rate Limit</TableHead>
                   <TableHead>Status</TableHead>
@@ -427,7 +471,11 @@ const KeysPage: React.FC = () => {
               <TableBody>
                 {keys.map((key) => (
                   <TableRow key={key.keyId || key.key}>
-                    <TableCell className="font-medium">{key.name || "—"}</TableCell>
+                    <TableCell className="font-medium">
+                      <button className="hover:underline" onClick={() => setOpenKey(key)}>
+                        {key.name || "—"}
+                      </button>
+                    </TableCell>
                     <TableCell>
                       <KeyCell value={key.key} keyId={key.keyId} onCopy={copyText} />
                     </TableCell>
@@ -438,7 +486,10 @@ const KeysPage: React.FC = () => {
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell>{key.costLimitInUsd != null ? `$${key.costLimitInUsd}` : "—"}</TableCell>
+                    <TableCell className="text-sm">
+                      {spend[key.keyId] != null ? `$${spend[key.keyId].toFixed(4)}` : "—"}
+                    </TableCell>
+                    <TableCell>{key.costLimitInUsd ? `$${key.costLimitInUsd}` : "—"}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {key.rateLimitOverTime ? `${key.rateLimitOverTime}/${key.rateLimitUnit}` : "—"}
                     </TableCell>
