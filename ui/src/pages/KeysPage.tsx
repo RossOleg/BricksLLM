@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { KeyRound, Plus, Copy, Loader2, Search } from "lucide-react";
+import { KeyRound, Plus, Copy, Loader2, Search, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 
@@ -41,6 +41,62 @@ function generateKey() {
   });
   return `dam-${uuid}`;
 }
+
+/**
+ * Сам ключ в таблице: по умолчанию скрыт, разворачивается и копируется.
+ *
+ * Показывается значение, а не keyId - тот внутренний и клиенту ни о чём не
+ * говорит. Ключи, сохранённые хешем, показать нечем: в этом поле у них хеш,
+ * и выдать его за ключ было бы хуже, чем честно сказать, что его нет.
+ *
+ * Хеш узнаём по самому значению - 64 шестнадцатеричных знака sha256, - а не по
+ * полю isKeyNotHashed: оно появилось позже, по умолчанию false, и у ключей,
+ * выписанных до него, соврало бы.
+ */
+const HASHED_KEY = /^[0-9a-f]{64}$/;
+
+const KeyCell: React.FC<{ value?: string; keyId?: string; onCopy: (v: string) => void }> = ({
+  value,
+  keyId,
+  onCopy,
+}) => {
+  const [shown, setShown] = useState(false);
+
+  if (!value || HASHED_KEY.test(value)) {
+    return (
+      <span className="font-mono text-xs text-muted-foreground" title={keyId ? `id ${keyId}` : undefined}>
+        stored hashed
+      </span>
+    );
+  }
+
+  const masked = value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
+
+  return (
+    <div className="flex items-center gap-1" title={keyId ? `id ${keyId}` : undefined}>
+      <button
+        onClick={() => onCopy(value)}
+        className="font-mono text-xs text-muted-foreground hover:text-foreground transition-colors break-all text-left"
+      >
+        {shown ? value : masked}
+      </button>
+      <button
+        onClick={() => setShown((s) => !s)}
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        title={shown ? "Hide" : "Show"}
+      >
+        {shown ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+      </button>
+      <button
+        onClick={() => onCopy(value)}
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        title="Copy"
+      >
+        <Copy className="h-3 w-3" />
+      </button>
+    </div>
+  );
+};
 
 const KeysPage: React.FC = () => {
   const api = useApi();
@@ -361,7 +417,7 @@ const KeysPage: React.FC = () => {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Name</TableHead>
-                  <TableHead>ID</TableHead>
+                  <TableHead>Key</TableHead>
                   <TableHead>Tags</TableHead>
                   <TableHead>Limit (USD)</TableHead>
                   <TableHead>Rate Limit</TableHead>
@@ -373,9 +429,7 @@ const KeysPage: React.FC = () => {
                   <TableRow key={key.keyId || key.key}>
                     <TableCell className="font-medium">{key.name || "—"}</TableCell>
                     <TableCell>
-                      <button onClick={() => copyText(key.keyId)} className="flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground transition-colors">
-                        {key.keyId?.slice(0, 8)}… <Copy className="h-3 w-3" />
-                      </button>
+                      <KeyCell value={key.key} keyId={key.keyId} onCopy={copyText} />
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
