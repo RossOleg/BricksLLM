@@ -112,11 +112,6 @@ func main() {
 		log.Sugar().Fatalf("error altering events table: %v", err)
 	}
 
-	err = store.CreateIndexesForEventsTable()
-	if err != nil {
-		log.Sugar().Fatalf("error creating indexes for events table: %v", err)
-	}
-
 	err = store.CreateProviderSettingsTable()
 	if err != nil {
 		log.Sugar().Fatalf("error creating provider settings table: %v", err)
@@ -363,6 +358,24 @@ func main() {
 	}
 
 	ps.Run()
+
+	// The events table is indexed in the background. It is an optimisation, not a
+	// requirement: without the indexes the history is slow, but with the gateway
+	// refusing to start it is unavailable. On a table of any size this takes
+	// minutes, which is also why it does not run before the servers.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+		defer cancel()
+
+		start := time.Now()
+
+		if err := store.CreateIndexesForEventsTable(ctx); err != nil {
+			log.Sugar().Errorf("error creating indexes for events table, the request history will be slow until they exist: %v", err)
+			return
+		}
+
+		log.Sugar().Infof("indexes for the events table are in place, took %s", time.Since(start).Round(time.Second))
+	}()
 
 	quit := make(chan os.Signal)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

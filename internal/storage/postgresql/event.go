@@ -120,33 +120,75 @@ func (s *Store) CreateEventsTable() error {
 	return nil
 }
 
+// eventIndex is one index this table needs, named so that a half built one can
+// be recognised and cleared.
+type eventIndex struct {
+	name      string
+	statement string
+}
+
+var eventIndexes = []eventIndex{
+	{"idx_events_created_at", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_events_created_at ON events (created_at DESC)"},
+	{"idx_events_key_id_created_at", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_events_key_id_created_at ON events (key_id, created_at DESC)"},
+	{"idx_events_custom_id", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_events_custom_id ON events (custom_id)"},
+	{"idx_events_user_id", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_events_user_id ON events (user_id)"},
+}
+
 // CreateIndexesForEventsTable indexes the events table itself.
 //
 // Until this was added the table had nothing but the primary key on event_id.
 // The three helpers named "...ForEventsByDayTable" above all index
 // event_agg_by_day, not events, and their original names said "events table",
 // which is easy to read as "this is covered". It was not: every history lookup -
-// always by key and time range - was a sequential scan of a table that stores
+// always by key and time range - was a sequential scan over a table that stores
 // whole request and response bodies.
 //
-// Building these on an existing table takes a write lock for the duration, so
-// the first start after the upgrade is slower than usual.
-func (s *Store) CreateIndexesForEventsTable() error {
-	createIndexQueries := []string{
-		`CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at DESC);`,
-		`CREATE INDEX IF NOT EXISTS idx_events_key_id_created_at ON events (key_id, created_at DESC);`,
-		`CREATE INDEX IF NOT EXISTS idx_events_custom_id ON events (custom_id);`,
-		`CREATE INDEX IF NOT EXISTS idx_events_user_id ON events (user_id);`,
-	}
-
-	for _, createIndexQuery := range createIndexQueries {
-		ctxTimeout, cancel := context.WithTimeout(context.Background(), s.wt)
-		_, err := s.db.ExecContext(ctxTimeout, createIndexQuery)
-		cancel()
-
-		if err != nil {
+// CONCURRENTLY, and called from a goroutine after the servers are up, because a
+// plain CREATE INDEX holds a write lock for as long as it runs. On a table that
+// has been collecting request bodies for months that is minutes, and doing it
+// before the servers start means the whole gateway is down for those minutes.
+// Nothing here is needed for correctness - the queries work without the indexes,
+// only slowly - so the caller logs a failure and carries on.
+//
+// The price of CONCURRENTLY is that a cancelled build leaves an index behind
+// that exists but is not valid, and which CREATE INDEX IF NOT EXISTS would then
+// skip forever. Each one is checked and dropped before it is built again.
+func (s *Store) CreateIndexesForEventsTable(ctx context.Context) error {
+	for _, index := range eventIndexes {
+		if err := s.dropInvalidIndex(ctx, index.name); err != nil {
 			return err
 		}
+
+		if _, err := s.db.ExecContext(ctx, index.statement); err != nil {
+			return fmt.Errorf("creating %s: %w", index.name, err)
+		}
+	}
+
+	return nil
+}
+
+// dropInvalidIndex removes an index left unusable by an interrupted build.
+func (s *Store) dropInvalidIndex(ctx context.Context, name string) error {
+	const query = `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_class c
+			JOIN pg_index i ON i.indexrelid = c.oid
+			WHERE c.relname = $1 AND NOT i.indisvalid
+		)`
+
+	invalid := false
+	if err := s.db.QueryRowContext(ctx, query, name).Scan(&invalid); err != nil {
+		return err
+	}
+
+	if !invalid {
+		return nil
+	}
+
+	// The name is one of our own constants, never anything a caller supplies -
+	// an index name cannot be a bound parameter.
+	if _, err := s.db.ExecContext(ctx, "DROP INDEX IF EXISTS "+name); err != nil {
+		return err
 	}
 
 	return nil
