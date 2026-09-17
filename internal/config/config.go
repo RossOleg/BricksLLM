@@ -52,6 +52,10 @@ type Config struct {
 	EncryptionTimeout             time.Duration `koanf:"encryption_timeout" env:"ENCRYPTION_TIMEOUT" envDefault:"5s"`
 	Audience                      string        `koanf:"audience" env:"AUDIENCE"`
 
+	// SupportPass opens the panel at the level that may only issue keys. Leaving
+	// it empty means there is no such level and ADMIN_PASS is the only way in.
+	SupportPass string `koanf:"support_pass" env:"SUPPORT_PASS"`
+
 	// The scale that turns a key's spend into the credits /api/credits reports.
 	// CreditsPerUsd is what enables the endpoint at all; zero leaves it off. None
 	// of these ever appear in a response - see credits.go for what each one does

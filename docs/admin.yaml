@@ -10,6 +10,7 @@ info:
 
 tags:
   - name: Health Check
+  - name: Session
   - name: Keys
   - name: Provider Settings
   - name: Users
@@ -330,6 +331,79 @@ paths:
               schema:
                 $ref: "#/components/schemas/InternalError"
 
+  /api/login:
+    post:
+      tags:
+        - Session
+      summary: Sign in
+      description: >-
+        Exchanges a password for a session cookie, so that the panel never keeps
+        the key itself. `ADMIN_PASS` grants the `full` role; `SUPPORT_PASS`, when
+        configured, grants `support`, which may only issue keys. The same endpoint
+        raises an existing session to `full`: which role is granted follows from
+        the password sent, never from what the caller asks for. The cookie is
+        HttpOnly, SameSite=Strict, and carries no secret - only a role, an expiry
+        and a signature over both.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+      responses:
+        200:
+          description: The session cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    type: string
+                    enum: [support, full]
+                  expiresAt:
+                    type: integer
+                    format: int64
+        401:
+          description: The password does not match.
+        404:
+          description: This gateway runs without an admin key.
+
+  /api/logout:
+    post:
+      tags:
+        - Session
+      summary: Sign out
+      description: Drops the session cookie.
+      responses:
+        204:
+          description: The cookie is cleared.
+
+  /api/session:
+    get:
+      tags:
+        - Session
+      summary: Current session
+      description: >-
+        Reports the role of the caller, so the panel can draw the matching amount
+        of itself. The answer is advisory: what a session may actually call is
+        decided on every request, not here.
+      responses:
+        200:
+          description: The session is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    type: string
+                    enum: [support, full]
+        401:
+          description: There is no valid session.
+
   /api/events:
     get:
       tags:
@@ -375,6 +449,84 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Event"
+        500:
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalError"
+
+    delete:
+      tags:
+        - Events
+      summary: Delete events
+      description: >-
+        This endpoint deletes the events created within a time range, both ends
+        included. Both `start` and `end` are required and have no default, so a
+        forgotten parameter cannot empty the table. Deletion runs in batches and
+        is resumable: a call that is interrupted keeps what it already removed,
+        and calling it again carries on. Disk space returns as autovacuum reclaims
+        the rows, not immediately.
+      parameters:
+        - in: query
+          required: true
+          name: start
+          schema:
+            type: integer
+          example: 1718581437
+          description: Start timestamp, inclusive.
+        - in: query
+          required: true
+          name: end
+          schema:
+            type: integer
+          example: 1718581437
+          description: End timestamp, inclusive.
+      responses:
+        200:
+          description: How many events were deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                    format: int64
+        400:
+          description: A timestamp is missing, malformed, or start is larger than end.
+        500:
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalError"
+
+  /api/events/{id}:
+    get:
+      tags:
+        - Events
+      summary: Get one event
+      description: >-
+        This endpoint returns a single event together with its `request` and `response`
+        bodies, which the event lists leave out.
+      parameters:
+        - in: path
+          required: true
+          name: id
+          schema:
+            type: string
+          example: 98daa3ae-961d-4253-bf6a-322a32fdca3d
+          description: Identifier of the event.
+      responses:
+        200:
+          description: The event, with its request and response bodies.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        404:
+          description: The event is not found.
         500:
           description: Internal server error.
           content:
@@ -456,84 +608,6 @@ paths:
       responses:
         200:
           description: Created custom provider.
-    delete:
-      tags:
-        - Events
-      summary: Delete events
-      description: >-
-        This endpoint deletes the events created within a time range, both ends
-        included. Both `start` and `end` are required and have no default, so a
-        forgotten parameter cannot empty the table. Deletion runs in batches and
-        is resumable: a call that is interrupted keeps what it already removed,
-        and calling it again carries on. Disk space returns as autovacuum reclaims
-        the rows, not immediately.
-      parameters:
-        - in: query
-          required: true
-          name: start
-          schema:
-            type: integer
-          example: 1718581437
-          description: Start timestamp, inclusive.
-        - in: query
-          required: true
-          name: end
-          schema:
-            type: integer
-          example: 1718581437
-          description: End timestamp, inclusive.
-      responses:
-        200:
-          description: How many events were deleted.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  deleted:
-                    type: integer
-                    format: int64
-        400:
-          description: A timestamp is missing, malformed, or start is larger than end.
-        500:
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InternalError"
-
-  /api/events/{id}:
-    get:
-      tags:
-        - Events
-      summary: Get one event
-      description: >-
-        This endpoint returns a single event together with its `request` and `response`
-        bodies, which the event lists leave out.
-      parameters:
-        - in: path
-          required: true
-          name: id
-          schema:
-            type: string
-          example: 98daa3ae-961d-4253-bf6a-322a32fdca3d
-          description: Identifier of the event.
-      responses:
-        200:
-          description: The event, with its request and response bodies.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Event"
-        404:
-          description: The event is not found.
-        500:
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InternalError"
-
           content:
             application/json:
               schema:

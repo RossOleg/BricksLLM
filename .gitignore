@@ -3,3 +3,4 @@ target
 .DS_STORE
 .vscode/launch.json
 .env
+ui/node_modules

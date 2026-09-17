@@ -15,6 +15,7 @@ import (
 	"github.com/bricks-cloud/bricksllm/internal/provider/custom"
 	"github.com/bricks-cloud/bricksllm/internal/telemetry"
 	"github.com/bricks-cloud/bricksllm/internal/util"
+	"github.com/bricks-cloud/bricksllm/ui"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -38,9 +39,9 @@ type KeyReportingManager interface {
 	GetTopKeyReporting(r *event.KeyReportingRequest) (*event.KeyReportingResponse, error)
 	GetKeyReporting(keyId string) (*key.KeyReporting, error)
 	GetEvents(userId, customId string, keyIds []string, start int64, end int64) ([]*event.Event, error)
-	GetEventsV2(r *event.EventRequest) (*event.EventResponse, error)
 	GetEventByID(id string) (*event.Event, error)
 	DeleteEvents(ctx context.Context, start, end int64) (int64, error)
+	GetEventsV2(r *event.EventRequest) (*event.EventResponse, error)
 	GetEventReporting(e *event.ReportingRequest) (*event.ReportingResponse, error)
 	GetAggregatedEventByDayReporting(e *event.ReportingRequest) (*event.ReportingResponseV2, error)
 	GetCustomIds(keyId string) ([]string, error)
@@ -67,11 +68,27 @@ type AdminServer struct {
 	m      KeyManager
 }
 
-func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReportingManager, psm ProviderSettingsManager, cpm CustomProvidersManager, rm RouteManager, pm PoliciesManager, um UserManager, adminPass string) (*AdminServer, error) {
+func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReportingManager, psm ProviderSettingsManager, cpm CustomProvidersManager, rm RouteManager, pm PoliciesManager, um UserManager, adminPass, supportPass string) (*AdminServer, error) {
 	router := gin.New()
 
 	prod := mode == "production"
-	router.Use(getAdminLoggerMiddleware(log, "admin", prod, adminPass))
+	router.Use(getAdminLoggerMiddleware(log, "admin", prod, adminPass, supportPass))
+
+	// The panel, and the two endpoints that hand it a session instead of letting
+	// it keep the admin key in the browser.
+	router.POST("/api/login", getLoginHandler(adminPass, supportPass))
+	router.POST("/api/logout", getLogoutHandler())
+
+	// Whether the cookie is still good, and at which level. Getting past the
+	// middleware is half the answer; the role is the other half.
+	router.GET("/api/session", getSessionHandler())
+
+	assets, err := ui.Assets()
+	if err != nil {
+		return nil, err
+	}
+
+	registerPanel(router, assets)
 
 	router.GET("/api/health", getGetHealthCheckHandler())
 
@@ -85,6 +102,8 @@ func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReporting
 	router.POST("/api/reporting/events", getGetEventMetricsHandler(krm, prod))
 	router.POST("/api/reporting/events-by-day", getGetEventMetricsByDayHandler(krm, prod))
 	router.GET("/api/events", getGetEventsHandler(krm, prod))
+	router.GET("/api/events/:id", getGetEventHandler(krm, prod))
+	router.DELETE("/api/events", getDeleteEventsHandler(krm, prod))
 	router.POST("/api/v2/events", getGetEventsV2Handler(krm, prod))
 	router.GET("/api/reporting/user-ids", getGetUserIdsHandler(krm, prod))
 	router.POST("/api/reporting/top-keys", getGetTopKeysMetricsHandler(krm, prod))
@@ -102,8 +121,6 @@ func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReporting
 	router.POST("/api/routes", getCreateRouteHandler(rm, prod))
 	router.GET("/api/routes/:id", getGetRouteHandler(rm, prod))
 	router.GET("/api/routes", getGetRoutesHandler(rm, prod))
-	router.GET("/api/events/:id", getGetEventHandler(krm, prod))
-	router.DELETE("/api/events", getDeleteEventsHandler(krm, prod))
 	router.DELETE("/api/routes/:id", getDeleteRouteHandler(rm, prod))
 
 	router.POST("/api/policies", getCreatePolicyHandler(pm, prod))
@@ -131,6 +148,10 @@ func (as *AdminServer) Run() {
 	go func() {
 		as.log.Info("admin server listening at 8001")
 		as.log.Info("PORT 8001 | GET    | /api/health is set up for health checking the admin server")
+		as.log.Info("PORT 8001 | POST   | /api/login is set up for exchanging the admin key for a session cookie")
+		as.log.Info("PORT 8001 | POST   | /api/logout is set up for dropping that session")
+		as.log.Info("PORT 8001 | GET    | /api/session is set up for checking whether that session is still valid")
+		as.log.Info("PORT 8001 | GET    | /admin is set up for serving the admin panel")
 		as.log.Info("PORT 8001 | GET    | /api/key-management/keys is set up for retrieving keys using a query param called tag")
 		as.log.Info("PORT 8001 | POST   | /api/v2/key-management/keys is set up for retrieving keys")
 		as.log.Info("PORT 8001 | PUT    | /api/key-management/keys is set up for creating a key")
@@ -377,6 +398,13 @@ func getGetProviderSettingsHandler(m ProviderSettingsManager, prod bool) gin.Han
 		}
 
 		telemetry.Incr("bricksllm.admin.get_get_provider_settings.success", nil, 1)
+
+		// A support session may see which settings exist, so that a new key can name
+		// one, but not the upstream provider key stored inside them.
+		if c.GetString(roleContextKey) == RoleSupport {
+			c.JSON(http.StatusOK, redactSettings(created))
+			return
+		}
 
 		c.JSON(http.StatusOK, created)
 	}
