@@ -550,6 +550,22 @@ func getCreateKeyHandler(m KeyManager, prod bool) gin.HandlerFunc {
 			return
 		}
 
+		if c.GetString(roleContextKey) == RoleSupport {
+			if err := applySupportKeyPolicy(rk); err != nil {
+				telemetry.Incr("bricksllm.admin.get_create_key_handler.support_policy_error", nil, 1)
+
+				c.JSON(http.StatusBadRequest, &ErrorResponse{
+					Type:     "/errors/validation",
+					Title:    "key is not one a support session may issue",
+					Status:   http.StatusBadRequest,
+					Detail:   err.Error(),
+					Instance: path,
+				})
+
+				return
+			}
+		}
+
 		resk, err := m.CreateKey(rk)
 		if err != nil {
 			errType := "internal"

@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
+	"github.com/bricks-cloud/bricksllm/internal/key"
 	"github.com/bricks-cloud/bricksllm/internal/provider"
 	"github.com/gin-gonic/gin"
 )
@@ -70,4 +73,51 @@ func forbidden(c *gin.Context) {
 		Detail:   "unlock the panel with the full admin password to do this",
 		Instance: c.FullPath(),
 	})
+}
+
+// SupportKeyTag is the group every key a support session issues belongs to.
+//
+// It is set here rather than taken from the request: the grouping is the
+// operator's, not the caller's, and "find every key support handed out" has to
+// keep working even if a client forgets to send it.
+const SupportKeyTag = "client"
+
+// supportKeyFields are the fields a support session may not set on a new key.
+//
+// They are all ways to shape the limit, and a level that exists so that keys
+// cannot be handed out unbounded has no business with them. The cost limit
+// itself is required instead - see applySupportKeyPolicy.
+var supportKeyFields = []struct {
+	name string
+	set  func(rk *key.RequestKey) bool
+}{
+	{"costLimitInUsdOverTime", func(rk *key.RequestKey) bool { return rk.CostLimitInUsdOverTime != 0 }},
+	{"costLimitInUsdUnit", func(rk *key.RequestKey) bool { return len(rk.CostLimitInUsdUnit) != 0 }},
+	{"rateLimitOverTime", func(rk *key.RequestKey) bool { return rk.RateLimitOverTime != 0 }},
+	{"rateLimitUnit", func(rk *key.RequestKey) bool { return len(rk.RateLimitUnit) != 0 }},
+	{"ttl", func(rk *key.RequestKey) bool { return len(rk.Ttl) != 0 }},
+	{"allowedPaths", func(rk *key.RequestKey) bool { return len(rk.AllowedPaths) != 0 }},
+	{"policyId", func(rk *key.RequestKey) bool { return len(rk.PolicyId) != 0 }},
+	{"rotationEnabled", func(rk *key.RequestKey) bool { return rk.RotationEnabled }},
+}
+
+// applySupportKeyPolicy narrows a new key to what a support session may issue.
+//
+// The panel draws only the fields below, but drawing is not enforcing: the same
+// person can post whatever they like straight to the api. This is where it is
+// decided.
+func applySupportKeyPolicy(rk *key.RequestKey) error {
+	if rk.CostLimitInUsd <= 0 {
+		return errors.New("costLimitInUsd is required and must be greater than zero")
+	}
+
+	for _, field := range supportKeyFields {
+		if field.set(rk) {
+			return fmt.Errorf("%s can only be set with the full admin password", field.name)
+		}
+	}
+
+	rk.Tags = []string{SupportKeyTag}
+
+	return nil
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useApi } from "@/hooks/useApi";
+import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, StatusBadge, EmptyState } from "@/components/ui/page-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,10 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 
 const AVAILABLE_TAGS = ["client", "daminion", "trial", "newyearevent"];
+
+// Ключ, выписанный поддержкой, всегда попадает в эту группу и всегда с лимитом.
+// Здесь это только подпись на форме - решает сервер, он же и проставляет тег.
+const SUPPORT_TAG = "client";
 
 // Ключ обязан назвать настройку провайдера, через которую пойдут его запросы.
 // Раньше id был вписан в код одной строкой; теперь он выбирается, а последний
@@ -38,6 +43,7 @@ function generateKey() {
 
 const KeysPage: React.FC = () => {
   const api = useApi();
+  const { isFull } = useAuth();
   const [keys, setKeys] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -115,6 +121,14 @@ const KeysPage: React.FC = () => {
       toast.error("Choose the provider this key will use");
       return;
     }
+
+    // Ключ без потолка тратит, пока его не заметят. Сервер это тоже проверяет,
+    // здесь - чтобы сказать об этом до отправки.
+    const costLimit = parseFloat(form.costLimitInUsd);
+    if (!isFull && !(costLimit > 0)) {
+      toast.error("Set a cost limit greater than zero");
+      return;
+    }
     try {
       const body: any = {
         name: form.name,
@@ -124,13 +138,18 @@ const KeysPage: React.FC = () => {
         shouldLogRequest: form.shouldLogRequest,
         shouldLogResponse: form.shouldLogResponse,
       };
-      if (form.tags) body.tags = form.tags.split(",").map(s => s.trim());
       if (form.costLimitInUsd) body.costLimitInUsd = parseFloat(form.costLimitInUsd);
-      if (form.costLimitInUsdOverTime) body.costLimitInUsdOverTime = parseFloat(form.costLimitInUsdOverTime);
-      if (form.costLimitInUsdOverTime) body.costLimitInUsdUnit = form.costLimitInUsdUnit;
-      if (form.rateLimitOverTime) body.rateLimitOverTime = parseInt(form.rateLimitOverTime);
-      if (form.rateLimitOverTime) body.rateLimitUnit = form.rateLimitUnit;
-      if (form.ttl) body.ttl = form.ttl;
+
+      // Остальные способы задать лимит доступны только в полном режиме -
+      // сервер отклонит их у support-сессии, так что и не отправляем.
+      if (isFull) {
+        if (form.tags) body.tags = form.tags.split(",").map(s => s.trim());
+        if (form.costLimitInUsdOverTime) body.costLimitInUsdOverTime = parseFloat(form.costLimitInUsdOverTime);
+        if (form.costLimitInUsdOverTime) body.costLimitInUsdUnit = form.costLimitInUsdUnit;
+        if (form.rateLimitOverTime) body.rateLimitOverTime = parseInt(form.rateLimitOverTime);
+        if (form.rateLimitOverTime) body.rateLimitUnit = form.rateLimitUnit;
+        if (form.ttl) body.ttl = form.ttl;
+      }
       await api.createKey(body);
       rememberSetting(settingId);
       toast.success("Key created");
@@ -192,67 +211,96 @@ const KeysPage: React.FC = () => {
                   <Button variant="outline" size="icon" onClick={() => setForm(p => ({ ...p, key: generateKey() }))} title="Regenerate">🔄</Button>
                 </div>
               </div>
+              {isFull ? (
+                <div>
+                  <Label>Tags</Label>
+                  <div className="flex gap-2 flex-wrap mt-1">
+                    {AVAILABLE_TAGS.map(t => {
+                      const selected = form.tags.split(",").map(s => s.trim()).filter(Boolean).includes(t);
+                      return (
+                        <Button
+                          key={t}
+                          type="button"
+                          size="sm"
+                          variant={selected ? "default" : "outline"}
+                          onClick={() => {
+                            const current = form.tags.split(",").map(s => s.trim()).filter(Boolean);
+                            const next = selected ? current.filter(x => x !== t) : [...current, t];
+                            setForm(p => ({ ...p, tags: next.join(", ") }));
+                          }}
+                        >
+                          {t}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Label>Tag</Label>
+                  <p className="mt-1 text-sm font-mono">{SUPPORT_TAG}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Keys issued here always belong to this group.
+                  </p>
+                </div>
+              )}
               <div>
-                <Label>Tags</Label>
-                <div className="flex gap-2 flex-wrap mt-1">
-                  {AVAILABLE_TAGS.map(t => {
-                    const selected = form.tags.split(",").map(s => s.trim()).filter(Boolean).includes(t);
-                    return (
-                      <Button
-                        key={t}
-                        type="button"
-                        size="sm"
-                        variant={selected ? "default" : "outline"}
-                        onClick={() => {
-                          const current = form.tags.split(",").map(s => s.trim()).filter(Boolean);
-                          const next = selected ? current.filter(x => x !== t) : [...current, t];
-                          setForm(p => ({ ...p, tags: next.join(", ") }));
-                        }}
-                      >
-                        {t}
-                      </Button>
-                    );
-                  })}
-                </div>
+                <Label>Cost Limit (USD){!isFull && " *"}</Label>
+                <Input
+                  className="mt-1"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.costLimitInUsd}
+                  onChange={e => setForm(p => ({ ...p, costLimitInUsd: e.target.value }))}
+                />
+                {!isFull && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Required, and greater than zero.
+                  </p>
+                )}
               </div>
-              <div><Label>Cost Limit (USD)</Label><Input className="mt-1" type="number" value={form.costLimitInUsd} onChange={e => setForm(p => ({ ...p, costLimitInUsd: e.target.value }))} /></div>
-              <div className="grid grid-cols-2 gap-2">
-                <div><Label>Cost Limit Over Time</Label><Input className="mt-1" type="number" value={form.costLimitInUsdOverTime} onChange={e => setForm(p => ({ ...p, costLimitInUsdOverTime: e.target.value }))} /></div>
-                <div>
-                  <Label>Unit</Label>
-                  <Select value={form.costLimitInUsdUnit} onValueChange={v => setForm(p => ({ ...p, costLimitInUsdUnit: v }))}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="h">Hour</SelectItem>
-                      <SelectItem value="d">Day</SelectItem>
-                      <SelectItem value="m">Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div><Label>Rate Limit Over Time</Label><Input className="mt-1" type="number" value={form.rateLimitOverTime} onChange={e => setForm(p => ({ ...p, rateLimitOverTime: e.target.value }))} /></div>
-                <div>
-                  <Label>Unit</Label>
-                  <Select value={form.rateLimitUnit} onValueChange={v => setForm(p => ({ ...p, rateLimitUnit: v }))}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="h">Hour</SelectItem>
-                      <SelectItem value="d">Day</SelectItem>
-                      <SelectItem value="m">Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div><Label>TTL</Label><Input className="mt-1" value={form.ttl} onChange={e => setForm(p => ({ ...p, ttl: e.target.value }))} placeholder="e.g. 24h" /></div>
-              <div className="flex items-center justify-between">
-                <Label>Log Requests</Label>
-                <Switch checked={form.shouldLogRequest} onCheckedChange={v => setForm(p => ({ ...p, shouldLogRequest: v }))} />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label>Log Responses</Label>
-                <Switch checked={form.shouldLogResponse} onCheckedChange={v => setForm(p => ({ ...p, shouldLogResponse: v }))} />
-              </div>
+              {isFull && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><Label>Cost Limit Over Time</Label><Input className="mt-1" type="number" value={form.costLimitInUsdOverTime} onChange={e => setForm(p => ({ ...p, costLimitInUsdOverTime: e.target.value }))} /></div>
+                    <div>
+                      <Label>Unit</Label>
+                      <Select value={form.costLimitInUsdUnit} onValueChange={v => setForm(p => ({ ...p, costLimitInUsdUnit: v }))}>
+                        <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="h">Hour</SelectItem>
+                          <SelectItem value="d">Day</SelectItem>
+                          <SelectItem value="m">Month</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><Label>Rate Limit Over Time</Label><Input className="mt-1" type="number" value={form.rateLimitOverTime} onChange={e => setForm(p => ({ ...p, rateLimitOverTime: e.target.value }))} /></div>
+                    <div>
+                      <Label>Unit</Label>
+                      <Select value={form.rateLimitUnit} onValueChange={v => setForm(p => ({ ...p, rateLimitUnit: v }))}>
+                        <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="h">Hour</SelectItem>
+                          <SelectItem value="d">Day</SelectItem>
+                          <SelectItem value="m">Month</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div><Label>TTL</Label><Input className="mt-1" value={form.ttl} onChange={e => setForm(p => ({ ...p, ttl: e.target.value }))} placeholder="e.g. 24h" /></div>
+                  <div className="flex items-center justify-between">
+                    <Label>Log Requests</Label>
+                    <Switch checked={form.shouldLogRequest} onCheckedChange={v => setForm(p => ({ ...p, shouldLogRequest: v }))} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label>Log Responses</Label>
+                    <Switch checked={form.shouldLogResponse} onCheckedChange={v => setForm(p => ({ ...p, shouldLogResponse: v }))} />
+                  </div>
+                </>
+              )}
               <Button onClick={handleCreate} className="w-full">Create</Button>
             </div>
           </DialogContent>
