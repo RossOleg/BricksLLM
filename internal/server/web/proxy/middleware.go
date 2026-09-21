@@ -86,6 +86,32 @@ type userAccessCache interface {
 	GetAccessStatus(userId string) bool
 }
 
+// metadataFromHeader turns the X-METADATA header into the bytes stored in the
+// event's JSONB column.
+//
+// The header already carries JSON, so it is stored as it came. Marshalling the
+// string would encode it a second time: the column would hold the literal
+// "{\"a\":1}" - a JSON scalar rather than a document - and metadata->>'a' would
+// find nothing. That defeats the only reason to keep metadata in JSONB, which is
+// to group and filter by its fields.
+//
+// A header that is not valid JSON is dropped rather than wrapped. Wrapping it
+// would put values of two different shapes in one column, and every reader would
+// then have to handle both.
+func metadataFromHeader(metadata string) ([]byte, bool) {
+	empty := []byte(`{}`)
+
+	if len(metadata) == 0 {
+		return empty, true
+	}
+
+	if !json.Valid([]byte(metadata)) {
+		return empty, false
+	}
+
+	return []byte(metadata), true
+}
+
 func JSON(c *gin.Context, code int, message string) {
 	c.JSON(code, &goopenai.ErrorResponse{
 		Error: &goopenai.APIError{
@@ -233,15 +259,10 @@ func getMiddleware(cpm CustomProvidersManager, rm routeManager, pm PoliciesManag
 				tags = enrichedEvent.Key.Tags
 			}
 
-			if len(metadata) != 0 {
-				data, err := json.Marshal(metadata)
-				if err != nil {
-					telemetry.Incr("bricksllm.proxy.get_middleware.json_marshal_metadata_err", nil, 1)
-				}
-
-				if err == nil {
-					metadataBytes = data
-				}
+			if data, ok := metadataFromHeader(metadata); ok {
+				metadataBytes = data
+			} else {
+				telemetry.Incr("bricksllm.proxy.get_middleware.invalid_metadata", nil, 1)
 			}
 
 			telemetry.Timing("bricksllm.proxy.get_middleware.proxy_latency_in_ms", dur, nil, 1)
