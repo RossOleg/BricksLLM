@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/bricks-cloud/bricksllm/internal/hasher"
 	"github.com/bricks-cloud/bricksllm/internal/key"
 	"github.com/bricks-cloud/bricksllm/internal/telemetry"
 	"github.com/gin-gonic/gin"
@@ -127,12 +126,8 @@ func resolveKeyUsage(c *gin.Context, m KeyManager, cs costStorage, clc costLimit
 		return nil, false
 	}
 
-	k, err := m.GetKeyViaCache(hasher.Hash(raw))
-
-	if k == nil {
-		// Keys issued before hashing was introduced are stored by value.
-		k, err = m.GetKeyViaCache(raw)
-	}
+	// Stored hashed or by value - both are asked for in one round trip.
+	k, err := m.GetKeyViaEitherForm(raw)
 
 	if err != nil {
 		// An unknown key comes back as an error, not as a nil key, exactly as it

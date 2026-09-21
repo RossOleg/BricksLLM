@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	internal_errors "github.com/bricks-cloud/bricksllm/internal/errors"
-	"github.com/bricks-cloud/bricksllm/internal/hasher"
 	"github.com/bricks-cloud/bricksllm/internal/telemetry"
 	metricname "github.com/bricks-cloud/bricksllm/internal/telemetry/metric_name"
 
@@ -28,7 +27,7 @@ type routesManager interface {
 }
 
 type keysCache interface {
-	GetKeyViaCache(hash string) (*key.ResponseKey, error)
+	GetKeyViaEitherForm(raw string) (*key.ResponseKey, error)
 }
 
 type keyStorage interface {
@@ -210,15 +209,9 @@ func (a *Authenticator) AuthenticateHttpRequest(req *http.Request) (*key.Respons
 		return nil, nil, err
 	}
 
-	hash := hasher.Hash(raw)
-
-	key, err := a.kc.GetKeyViaCache(hash)
+	key, err := a.kc.GetKeyViaEitherForm(raw)
 	if key != nil {
 		telemetry.Incr(metricname.COUNTER_AUTHENTICATOR_FOUND_KEY_FROM_MEMDB, nil, 1)
-	}
-
-	if key == nil {
-		key, err = a.kc.GetKeyViaCache(raw)
 	}
 
 	if err != nil {

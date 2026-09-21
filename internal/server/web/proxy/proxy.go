@@ -47,6 +47,7 @@ type recorder interface {
 type KeyManager interface {
 	GetKeys(tags, keyIds []string, provider string) ([]*key.ResponseKey, error)
 	GetKeyViaCache(raw string) (*key.ResponseKey, error)
+	GetKeyViaEitherForm(raw string) (*key.ResponseKey, error)
 	UpdateKey(id string, key *key.UpdateKey) (*key.ResponseKey, error)
 	CreateKey(key *key.RequestKey) (*key.ResponseKey, error)
 	DeleteKey(id string) error

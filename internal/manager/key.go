@@ -44,6 +44,7 @@ type keyCache interface {
 	Set(keyId string, value interface{}, ttl time.Duration) error
 	Delete(keyId string) error
 	Get(keyId string) (*key.ResponseKey, error)
+	GetAny(keyIds ...string) (*key.ResponseKey, error)
 }
 
 type Manager struct {
@@ -196,6 +197,49 @@ func (m *Manager) UpdateKey(id string, uk *key.UpdateKey) (*key.ResponseKey, err
 	}
 
 	return updated, nil
+}
+
+// GetKeyViaEitherForm finds the key that signs a request, whether it is stored
+// hashed or exactly as it was issued.
+//
+// Which of the two it is cannot be told from the key itself, so both have to be
+// tried. Redis is asked for both in one round trip first, because trying them
+// one after the other means that for every key stored unhashed - which is every
+// key issued with isKeyNotHashed - each proxied request first misses in redis on
+// the hashed form and then misses in postgres on it, before the form that
+// actually exists is ever looked up.
+func (m *Manager) GetKeyViaEitherForm(raw string) (*key.ResponseKey, error) {
+	hash := hasher.Hash(raw)
+
+	k, err := m.kc.GetAny(hash, raw)
+	if err != nil {
+		telemetry.Incr("bricksllm.manager.get_key_via_either_form.cache_error", nil, 1)
+	}
+
+	if k != nil {
+		telemetry.Incr("bricksllm.manager.get_key_via_either_form.cache_hit", nil, 1)
+		return k, nil
+	}
+
+	// Cold cache: the store decides, and fills the cache for the requests after
+	// this one.
+	telemetry.Incr("bricksllm.manager.get_key_via_either_form.cache_miss", nil, 1)
+
+	k, hashedErr := m.GetKeyViaCache(hash)
+	if k != nil {
+		return k, nil
+	}
+
+	k, rawErr := m.GetKeyViaCache(raw)
+	if k != nil {
+		return k, nil
+	}
+
+	if rawErr != nil {
+		return nil, rawErr
+	}
+
+	return nil, hashedErr
 }
 
 func (m *Manager) GetKeyViaCache(raw string) (*key.ResponseKey, error) {
