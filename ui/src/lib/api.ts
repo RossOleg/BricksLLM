@@ -61,6 +61,8 @@ export class BricksApi {
 
   // Events
   listEvents(params?: Record<string, string>) { return this.request<any[]>("GET", "/api/events", undefined, params); }
+  /** Одно событие целиком, с телами запроса и ответа: список их не отдаёт. */
+  getEvent(id: string) { return this.request<any>("GET", `/api/events/${id}`); }
 
   // Users
   listUsers(params?: Record<string, string>) { return this.request<any[]>("GET", "/api/users", undefined, params); }

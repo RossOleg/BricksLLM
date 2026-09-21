@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { downloadCsv, csvDate } from "@/lib/csv";
+import EventDetails from "@/components/EventDetails";
 
 /**
  * Карточка ключа: что он потратил, что в нём можно поправить и что им делали.
@@ -32,6 +33,8 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
   const [spend, setSpend] = useState<number | null>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  // Раскрытое событие: тела грузятся по id и только для него.
+  const [openEvent, setOpenEvent] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({ name: "", costLimitInUsd: "", revoked: false });
@@ -47,6 +50,7 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
     });
     setSpend(null);
     setEvents([]);
+    setOpenEvent(null);
     setTab(isFull ? "edit" : "info");
   }, [apiKey, isFull]);
 
@@ -238,44 +242,72 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
                           { header: "Prompt tokens", value: (e: any) => e.prompt_token_count },
                           { header: "Completion tokens", value: (e: any) => e.completion_token_count },
                           { header: "Latency ms", value: (e: any) => e.latency_in_ms },
+                          { header: "Method", value: (e: any) => e.method },
+                          { header: "Path", value: (e: any) => e.path },
                         ])
                       }
                     >
                       Export CSV
                     </Button>
                   </div>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Click a request to see what was sent and what came back.
+                  </p>
                   <div className="max-h-80 overflow-y-auto rounded-lg border border-border">
                     <Table>
                       <TableHeader>
                         <TableRow className="hover:bg-transparent">
                           <TableHead>Time</TableHead>
+                          <TableHead>Endpoint</TableHead>
                           <TableHead>Model</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>Took</TableHead>
                           <TableHead>Cost</TableHead>
                           <TableHead>Tokens</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {events.map((e: any) => (
-                          <TableRow key={e.id}>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {e.created_at ? new Date(e.created_at * 1000).toLocaleString() : "—"}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">{e.model || "—"}</TableCell>
-                            <TableCell
-                              className={`font-mono text-xs ${
-                                e.status >= 200 && e.status < 300 ? "text-success" : "text-destructive"
-                              }`}
+                          <React.Fragment key={e.id}>
+                            <TableRow
+                              className="cursor-pointer"
+                              onClick={() => setOpenEvent((current) => (current === e.id ? null : e.id))}
                             >
-                              {e.status}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {e.cost_in_usd != null ? `$${e.cost_in_usd.toFixed(4)}` : "—"}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              ↑{e.prompt_token_count ?? 0} ↓{e.completion_token_count ?? 0}
-                            </TableCell>
-                          </TableRow>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {e.created_at ? new Date(e.created_at * 1000).toLocaleString() : "—"}
+                              </TableCell>
+                              {/* Путь показываем хвостом: общий префикс /api/providers/... у всех
+                                  одинаковый и только мешает читать. Полный - в подсказке и в CSV. */}
+                              <TableCell className="font-mono text-xs" title={`${e.method || ""} ${e.path || ""}`}>
+                                {e.path ? `${e.method || ""} ${e.path.replace(/^\/api\/providers\//, "")}` : "—"}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">{e.model || "—"}</TableCell>
+                              <TableCell
+                                className={`font-mono text-xs ${
+                                  e.status >= 200 && e.status < 300 ? "text-success" : "text-destructive"
+                                }`}
+                              >
+                                {e.status}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {e.latency_in_ms != null ? `${e.latency_in_ms} ms` : "—"}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {e.cost_in_usd != null ? `$${e.cost_in_usd.toFixed(4)}` : "—"}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                ↑{e.prompt_token_count ?? 0} ↓{e.completion_token_count ?? 0}
+                              </TableCell>
+                            </TableRow>
+
+                            {openEvent === e.id && (
+                              <TableRow className="hover:bg-transparent">
+                                <TableCell colSpan={7} className="py-0">
+                                  <EventDetails eventId={e.id} />
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
                         ))}
                       </TableBody>
                     </Table>
