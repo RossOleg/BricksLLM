@@ -329,19 +329,28 @@ func main() {
 	v := validator.NewValidator(costLimitCache, rateLimitCache, costStorage)
 	uv := validator.NewUserValidator(userCostLimitCache, userRateLimitCache, userCostStorage)
 
-	rec := recorder.NewRecorder(costStorage, userCostStorage, costLimitCache, userCostLimitCache, ce, store)
+	// The history of requests is written in batches, away from the request path:
+	// what a finished request has to wait for is a counter in redis, not a row
+	// carrying its whole body.
+	eventBatcher := recorder.NewEventBatcher(store, log, cfg.EventQueueSize, cfg.EventBatchSize, cfg.EventBatchWriters, cfg.EventBatchInterval)
+	eventBatcher.Start()
+
+	rec := recorder.NewRecorder(costStorage, userCostStorage, costLimitCache, userCostLimitCache, ce, eventBatcher)
 	rlm := manager.NewRateLimitManager(rateLimitCache, userRateLimitCache)
 	a := auth.NewAuthenticator(psm, m, rm, store, encryptor)
 
 	c := cache.NewCache(apiCache)
 
 	messageBus := message.NewMessageBus()
-	eventMessageChan := make(chan message.Message)
+
+	// Buffered: publishing happens while a request is being finished, so a burst
+	// has to land somewhere other than in the caller's latency.
+	eventMessageChan := make(chan message.Message, cfg.EventQueueSize)
 	messageBus.Subscribe("event", eventMessageChan)
 
 	handler := message.NewHandler(rec, log, ace, ce, vllme, aoe, v, uv, m, um, rlm, accessCache, userAccessCache)
 
-	eventConsumer := message.NewConsumer(eventMessageChan, log, 4, handler.HandleEventWithRequestAndResponse)
+	eventConsumer := message.NewConsumer(eventMessageChan, log, cfg.NumberOfEventMessageConsumers, handler.HandleEventWithRequestAndResponse)
 	eventConsumer.StartEventMessageConsumers()
 
 	detector, err := amazon.NewClient(cfg.AmazonRequestTimeout, cfg.AmazonConnectionTimeout, log, cfg.AmazonRegion)
@@ -398,6 +407,10 @@ func main() {
 	if err := ps.Shutdown(ctx); err != nil {
 		log.Sugar().Debugf("proxy server shutdown: %v", err)
 	}
+
+	// Last, once nothing can produce events any more: what is still queued is
+	// requests that already happened.
+	eventBatcher.Stop()
 
 	select {
 	case <-ctx.Done():

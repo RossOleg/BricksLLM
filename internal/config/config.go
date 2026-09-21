@@ -39,7 +39,7 @@ type Config struct {
 	PrometheusPort                string        `koanf:"prometheus_port" env:"PROMETHEUS_PORT" envDefault:"2112"`
 	AdminPass                     string        `koanf:"admin_pass" env:"ADMIN_PASS"`
 	ProxyTimeout                  time.Duration `koanf:"proxy_timeout" env:"PROXY_TIMEOUT" envDefault:"600s"`
-	NumberOfEventMessageConsumers int           `koanf:"number_of_event_message_consumers" env:"NUMBER_OF_EVENT_MESSAGE_CONSUMERS" envDefault:"3"`
+	NumberOfEventMessageConsumers int           `koanf:"number_of_event_message_consumers" env:"NUMBER_OF_EVENT_MESSAGE_CONSUMERS" envDefault:"4"`
 	OpenAiApiKey                  string        `koanf:"openai_api_key" env:"OPENAI_API_KEY"`
 	CustomPolicyDetectionTimeout  time.Duration `koanf:"custom_policy_detection_timeout" env:"CUSTOM_POLICY_DETECTION_TIMEOUT" envDefault:"10m"`
 	AmazonRegion                  string        `koanf:"amazon_region" env:"AMAZON_REGION" envDefault:"us-west-2"`
@@ -70,6 +70,24 @@ type Config struct {
 	CreditsExponent float64 `koanf:"credits_exponent" env:"CREDITS_EXPONENT" envDefault:"1"`
 	CreditsOffset   int64   `koanf:"credits_offset" env:"CREDITS_OFFSET" envDefault:"0"`
 	CreditsStep     int64   `koanf:"credits_step" env:"CREDITS_STEP" envDefault:"1"`
+
+	// How the history of requests is written. It is written away from the request
+	// path, in batches, because one insert per event decides how fast the proxy
+	// can answer - see recorder.EventBatcher.
+	//
+	// NumberOfEventMessageConsumers above is how many goroutines take finished
+	// requests off the queue and count what they spent; its default is what the
+	// code used to hardcode while ignoring the setting entirely.
+	//
+	// EventQueueSize is how many finished requests may be waiting at each stage
+	// before events start being dropped. A drop costs a line in the history, never
+	// spend: that is counted in redis before an event ever reaches the queue.
+	// EventBatchSize and EventBatchInterval are whichever comes first, and
+	// EventBatchWriters is how many batches may be in flight at once.
+	EventQueueSize     int           `koanf:"event_queue_size" env:"EVENT_QUEUE_SIZE" envDefault:"10000"`
+	EventBatchSize     int           `koanf:"event_batch_size" env:"EVENT_BATCH_SIZE" envDefault:"50"`
+	EventBatchInterval time.Duration `koanf:"event_batch_interval" env:"EVENT_BATCH_INTERVAL" envDefault:"500ms"`
+	EventBatchWriters  int           `koanf:"event_batch_writers" env:"EVENT_BATCH_WRITERS" envDefault:"2"`
 
 	// ModelsCacheTtl is how long the provider's model catalogue is kept in redis.
 	// Listing it is free and the answer only changes when the provider ships a

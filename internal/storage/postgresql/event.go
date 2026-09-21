@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 
 	internal_errors "github.com/bricks-cloud/bricksllm/internal/errors"
@@ -1044,36 +1046,13 @@ func (s *Store) GetEventsV2(req *event.EventRequest) (*event.EventResponse, erro
 // secondsInDay is the width of a bucket in event_agg_by_day.
 const secondsInDay int64 = 86400
 
-// eventAggByDayUpsert adds one event to the rollup of its day.
-//
-// The bucket is the start of the UTC day. The conflict target is the unique
-// index on (time_stamp, key_id), so an event either starts the day of its key or
-// is added to it.
-const eventAggByDayUpsert = `
-	INSERT INTO event_agg_by_day (time_stamp, key_id, num_of_requests, cost_in_usd, latency_in_ms, prompt_token_count, success_count, completion_token_count)
-	VALUES ($1, $2, 1, $3, $4, $5, $6, $7)
-	ON CONFLICT (time_stamp, key_id) DO UPDATE SET
-		num_of_requests = event_agg_by_day.num_of_requests + 1,
-		cost_in_usd = event_agg_by_day.cost_in_usd + EXCLUDED.cost_in_usd,
-		latency_in_ms = event_agg_by_day.latency_in_ms + EXCLUDED.latency_in_ms,
-		prompt_token_count = event_agg_by_day.prompt_token_count + EXCLUDED.prompt_token_count,
-		success_count = event_agg_by_day.success_count + EXCLUDED.success_count,
-		completion_token_count = event_agg_by_day.completion_token_count + EXCLUDED.completion_token_count`
+// eventColumns is the column list every event insert writes, and eventFields
+// pulls the matching values out of an event. They are one thing in two halves
+// and have to be changed together.
+const eventInsertColumns = "(event_id, created_at, tags, key_id, cost_in_usd, provider, model, status_code, prompt_token_count, completion_token_count, latency_in_ms, path, method, custom_id, request, response, user_id, action, policy_id, route_id, correlation_id, metadata)"
 
-// InsertEvent stores an event and adds it to the rollup of its day.
-//
-// Both writes share one transaction: the rollup is a running total, so an event
-// counted in it but missing from events - or the other way round - can never be
-// reconciled afterwards. The rollup is what survives a cleanup of the history,
-// which is the whole reason it exists, so it has to agree with the events while
-// they are still there.
-func (s *Store) InsertEvent(e *event.Event) error {
-	query := `
-		INSERT INTO events (event_id, created_at, tags, key_id, cost_in_usd, provider, model, status_code, prompt_token_count, completion_token_count, latency_in_ms, path, method, custom_id, request, response, user_id, action, policy_id, route_id, correlation_id, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-	`
-
-	values := []any{
+func eventFields(e *event.Event) []any {
+	return []any{
 		e.Id,
 		e.CreatedAt,
 		sliceToSqlStringArray(e.Tags),
@@ -1097,6 +1076,133 @@ func (s *Store) InsertEvent(e *event.Event) error {
 		e.CorrelationId,
 		e.Metadata,
 	}
+}
+
+// maxEventsPerStatement keeps one statement under postgres' limit of 65535
+// parameters: 22 columns leaves room for 2979 rows, and a round number well
+// below that costs nothing.
+const maxEventsPerStatement = 500
+
+// eventAggByDayUpsert adds a batch of events to the rollups of their days.
+//
+// The bucket is the start of the UTC day and the conflict target is the unique
+// index on (time_stamp, key_id), so a batch either starts the day of a key or is
+// added to it. num_of_requests is a value rather than a literal 1 because a
+// batch adds as many requests as it carries.
+const eventAggByDayUpsert = `
+	INSERT INTO event_agg_by_day (time_stamp, key_id, num_of_requests, cost_in_usd, latency_in_ms, prompt_token_count, success_count, completion_token_count)
+	VALUES %s
+	ON CONFLICT (time_stamp, key_id) DO UPDATE SET
+		num_of_requests = event_agg_by_day.num_of_requests + EXCLUDED.num_of_requests,
+		cost_in_usd = event_agg_by_day.cost_in_usd + EXCLUDED.cost_in_usd,
+		latency_in_ms = event_agg_by_day.latency_in_ms + EXCLUDED.latency_in_ms,
+		prompt_token_count = event_agg_by_day.prompt_token_count + EXCLUDED.prompt_token_count,
+		success_count = event_agg_by_day.success_count + EXCLUDED.success_count,
+		completion_token_count = event_agg_by_day.completion_token_count + EXCLUDED.completion_token_count`
+
+// dayRollup is what a batch adds to one (day, key) bucket.
+type dayRollup struct {
+	day                  int64
+	keyId                string
+	numOfRequests        int
+	costInUsd            float64
+	latencyInMs          int
+	promptTokenCount     int
+	successCount         int
+	completionTokenCount int
+}
+
+// rollUpByDay folds a batch into one row per (day, key).
+//
+// Fifty events of one key on one day become one upsert instead of fifty, and
+// the result is sorted so that concurrent writers touch the same buckets in the
+// same order - out of order they would deadlock against each other.
+func rollUpByDay(events []*event.Event) []dayRollup {
+	index := map[string]*dayRollup{}
+	order := []*dayRollup{}
+
+	for _, e := range events {
+		// Negative timestamps would floor the wrong way, and an event from before
+		// 1970 is a broken event anyway.
+		day := int64(0)
+		if e.CreatedAt > 0 {
+			day = e.CreatedAt - e.CreatedAt%secondsInDay
+		}
+
+		id := fmt.Sprintf("%d:%s", day, e.KeyId)
+
+		bucket, ok := index[id]
+		if !ok {
+			bucket = &dayRollup{day: day, keyId: e.KeyId}
+			index[id] = bucket
+			order = append(order, bucket)
+		}
+
+		bucket.numOfRequests++
+		bucket.costInUsd += e.CostInUsd
+		bucket.latencyInMs += e.LatencyInMs
+		bucket.promptTokenCount += e.PromptTokenCount
+		bucket.completionTokenCount += e.CompletionTokenCount
+
+		if e.Status == http.StatusOK {
+			bucket.successCount++
+		}
+	}
+
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].day != order[j].day {
+			return order[i].day < order[j].day
+		}
+
+		return order[i].keyId < order[j].keyId
+	})
+
+	rollups := make([]dayRollup, 0, len(order))
+	for _, bucket := range order {
+		rollups = append(rollups, *bucket)
+	}
+
+	return rollups
+}
+
+// valueTuples builds "($1,...,$n),($n+1,...)" for the given shape.
+func valueTuples(rows, columns int) string {
+	tuples := make([]string, 0, rows)
+
+	for row := 0; row < rows; row++ {
+		placeholders := make([]string, 0, columns)
+		for column := 0; column < columns; column++ {
+			placeholders = append(placeholders, "$"+strconv.Itoa(row*columns+column+1))
+		}
+
+		tuples = append(tuples, "("+strings.Join(placeholders, ",")+")")
+	}
+
+	return strings.Join(tuples, ",")
+}
+
+// InsertEvent stores one event and adds it to the rollup of its day.
+func (s *Store) InsertEvent(e *event.Event) error {
+	return s.InsertEvents([]*event.Event{e})
+}
+
+// InsertEvents stores a batch of events and adds them to the rollups of their
+// days.
+//
+// The batch is what makes this cheap: fifty events written in one statement cost
+// about a quarter per event of what fifty separate inserts cost, and the whole
+// point of the event pipeline is that it must not become the slowest thing about
+// a proxied request.
+//
+// Rows and rollups share one transaction. The rollup is a running total, so an
+// event counted in it but missing from events - or the other way round - can
+// never be reconciled afterwards. The rollup is also what survives a cleanup of
+// the history, which is the reason it exists, so it has to agree with the events
+// while they are still there.
+func (s *Store) InsertEvents(events []*event.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.wt)
 	defer cancel()
@@ -1108,33 +1214,52 @@ func (s *Store) InsertEvent(e *event.Event) error {
 
 	defer tx.Rollback()
 
+	for start := 0; start < len(events); start += maxEventsPerStatement {
+		end := start + maxEventsPerStatement
+		if end > len(events) {
+			end = len(events)
+		}
+
+		chunk := events[start:end]
+
+		values := make([]any, 0, len(chunk)*eventInsertColumnCount)
+		for _, e := range chunk {
+			values = append(values, eventFields(e)...)
+		}
+
+		query := "INSERT INTO events " + eventInsertColumns + " VALUES " + valueTuples(len(chunk), eventInsertColumnCount)
+
+		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
+			return err
+		}
+	}
+
+	rollups := rollUpByDay(events)
+
+	values := make([]any, 0, len(rollups)*aggByDayColumnCount)
+	for _, r := range rollups {
+		values = append(values,
+			r.day,
+			r.keyId,
+			r.numOfRequests,
+			r.costInUsd,
+			r.latencyInMs,
+			r.promptTokenCount,
+			r.successCount,
+			r.completionTokenCount,
+		)
+	}
+
+	query := fmt.Sprintf(eventAggByDayUpsert, valueTuples(len(rollups), aggByDayColumnCount))
+
 	if _, err := tx.ExecContext(ctx, query, values...); err != nil {
-		return err
-	}
-
-	// Negative timestamps would floor the wrong way, and an event from before 1970
-	// is a broken event anyway.
-	day := int64(0)
-	if e.CreatedAt > 0 {
-		day = e.CreatedAt - e.CreatedAt%secondsInDay
-	}
-
-	successCount := 0
-	if e.Status == http.StatusOK {
-		successCount = 1
-	}
-
-	if _, err := tx.ExecContext(ctx, eventAggByDayUpsert,
-		day,
-		e.KeyId,
-		e.CostInUsd,
-		e.LatencyInMs,
-		e.PromptTokenCount,
-		successCount,
-		e.CompletionTokenCount,
-	); err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
+
+const (
+	eventInsertColumnCount = 22
+	aggByDayColumnCount    = 8
+)

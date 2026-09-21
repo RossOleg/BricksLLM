@@ -153,7 +153,11 @@ docker pull luyuanxin1995/bricksllm:1.4.0
 > | `IN_MEMORY_DB_UPDATE_INTERVAL`         | optional | The interval BricksLLM API gateway polls Postgresql DB for latest key configurations | `1s` |
 > | `STATS_PROVIDER`         | optional | "datadog" or Host:Port(127.0.0.1:8125) for statsd.  |
 > | `PROXY_TIMEOUT`         | optional | Timeout for proxy HTTP requests. | `600s` |
-> | `NUMBER_OF_EVENT_MESSAGE_CONSUMERS`         | optional | Number of event message consumers that help handle counting tokens and inserting event into db.  | `3` |
+> | `NUMBER_OF_EVENT_MESSAGE_CONSUMERS`         | optional | Number of consumers that take finished requests off the queue and count what they spent.  | `4` |
+> | `EVENT_QUEUE_SIZE`         | optional | How many finished requests may wait at each stage of the history pipeline before events are dropped. A drop costs a line in the history, never spend: that is already counted in Redis.  | `10000` |
+> | `EVENT_BATCH_SIZE`         | optional | How many events are written to Postgresql in one statement.  | `50` |
+> | `EVENT_BATCH_INTERVAL`         | optional | How long a partly filled batch waits before it is written anyway.  | `500ms` |
+> | `EVENT_BATCH_WRITERS`         | optional | How many batches may be written at once.  | `2` |
 > | `MODELS_CACHE_TTL`         | optional | How long the provider's model catalogue is cached in Redis per upstream key. `0` sends every listing upstream.  | `1h` |
 > | `AWS_SECRET_ACCESS_KEY`         | optional | It is for PII detection feature.  | `5s` |
 > | `AWS_ACCESS_KEY_ID`         | optional | It is for using PII detection feature.  | `5s` |
