@@ -294,18 +294,25 @@ const KeysPage: React.FC = () => {
               </div>
               )}
               <div><Label>Name</Label><Input className="mt-1" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="My key" /></div>
-              {isFull && (
-                <div>
-                  <Label>Key</Label>
-                  <div className="flex gap-2 mt-1">
-                    <Input className="font-mono text-xs" value={form.key} onChange={e => setForm(p => ({ ...p, key: e.target.value }))} />
-                    <Button variant="outline" size="icon" onClick={() => setForm(p => ({ ...p, key: generateKey() }))} title="Regenerate">🔄</Button>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Generated as dam- plus a uuid. Typing your own is only possible here.
-                  </p>
+              {/* Генератор есть у обоих режимов; ввести ключ руками - только полный.
+                  Сервер у support-сессии всё равно примет лишь dam-<uuid>. */}
+              <div>
+                <Label>Key</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    className="font-mono text-xs"
+                    value={form.key}
+                    readOnly={!isFull}
+                    onChange={isFull ? e => setForm(p => ({ ...p, key: e.target.value })) : undefined}
+                  />
+                  <Button variant="outline" size="icon" onClick={() => setForm(p => ({ ...p, key: generateKey() }))} title="Regenerate">🔄</Button>
                 </div>
-              )}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {isFull
+                    ? "Generated as dam- plus a uuid. You can also type your own."
+                    : "Generated as dam- plus a uuid. You will be able to copy it after the key is created."}
+                </p>
+              </div>
               {isFull ? (
                 <div>
                   <Label>Tags</Label>
