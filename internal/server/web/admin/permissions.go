@@ -86,13 +86,21 @@ const SupportKeyTag = "client"
 
 // supportKeyFields are the fields a support session may not set on a new key.
 //
-// They are all ways to shape the limit, and a level that exists so that keys
+// Most of them are ways to shape the limit, and a level that exists so that keys
 // cannot be handed out unbounded has no business with them. The cost limit
 // itself is required instead - see applySupportKeyPolicy.
+//
+// The two logging switches are here for a different reason. A key that logs
+// writes the whole request and response of every call into the events table, and
+// for image tagging that is megabytes per call. Turning it on is a decision about
+// how fast the database fills up, so it takes the full password; for a support
+// session the switches simply stay off.
 var supportKeyFields = []struct {
 	name string
 	set  func(rk *key.RequestKey) bool
 }{
+	{"shouldLogRequest", func(rk *key.RequestKey) bool { return rk.ShouldLogRequest }},
+	{"shouldLogResponse", func(rk *key.RequestKey) bool { return rk.ShouldLogResponse }},
 	{"costLimitInUsdOverTime", func(rk *key.RequestKey) bool { return rk.CostLimitInUsdOverTime != 0 }},
 	{"costLimitInUsdUnit", func(rk *key.RequestKey) bool { return len(rk.CostLimitInUsdUnit) != 0 }},
 	{"rateLimitOverTime", func(rk *key.RequestKey) bool { return rk.RateLimitOverTime != 0 }},

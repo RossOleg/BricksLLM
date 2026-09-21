@@ -126,8 +126,10 @@ const KeysPage: React.FC = () => {
     rateLimitOverTime: "",
     rateLimitUnit: "d",
     ttl: "",
-    shouldLogRequest: true,
-    shouldLogResponse: true,
+    // Выключено по умолчанию: ключ с логированием пишет тело каждого запроса и
+    // ответа в events, а у разметки картинок это мегабайты на вызов.
+    shouldLogRequest: false,
+    shouldLogResponse: false,
   });
 
   const loadSettings = useCallback(async () => {
@@ -223,10 +225,14 @@ const KeysPage: React.FC = () => {
         name: form.name,
         key: form.key,
         isKeyNotHashed: true,
-        shouldLogRequest: form.shouldLogRequest,
-        shouldLogResponse: form.shouldLogResponse,
       };
-      if (isFull) body.settingIds = [settingId];
+      // Логирование - решение полного доступа: support-сессии сервер его всё
+      // равно не примет, так что и поля от неё не уходят.
+      if (isFull) {
+        body.settingIds = [settingId];
+        body.shouldLogRequest = form.shouldLogRequest;
+        body.shouldLogResponse = form.shouldLogResponse;
+      }
       if (form.costLimitInUsd) body.costLimitInUsd = parseFloat(form.costLimitInUsd);
 
       // Остальные способы задать лимит доступны только в полном режиме -
@@ -248,7 +254,7 @@ const KeysPage: React.FC = () => {
         name: "", key: generateKey(), tags: "",
         costLimitInUsd: "", costLimitInUsdOverTime: "", costLimitInUsdUnit: "d",
         rateLimitOverTime: "", rateLimitUnit: "d", ttl: "",
-        shouldLogRequest: true, shouldLogResponse: true,
+        shouldLogRequest: false, shouldLogResponse: false,
       });
     } catch (e: any) {
       toast.error(e.message);
@@ -393,13 +399,19 @@ const KeysPage: React.FC = () => {
                     </div>
                   </div>
                   <div><Label>TTL</Label><Input className="mt-1" value={form.ttl} onChange={e => setForm(p => ({ ...p, ttl: e.target.value }))} placeholder="e.g. 24h" /></div>
-                  <div className="flex items-center justify-between">
-                    <Label>Log Requests</Label>
-                    <Switch checked={form.shouldLogRequest} onCheckedChange={v => setForm(p => ({ ...p, shouldLogRequest: v }))} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label>Log Responses</Label>
-                    <Switch checked={form.shouldLogResponse} onCheckedChange={v => setForm(p => ({ ...p, shouldLogResponse: v }))} />
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <Label>Log Requests</Label>
+                      <Switch checked={form.shouldLogRequest} onCheckedChange={v => setForm(p => ({ ...p, shouldLogRequest: v }))} />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <Label>Log Responses</Label>
+                      <Switch checked={form.shouldLogResponse} onCheckedChange={v => setForm(p => ({ ...p, shouldLogResponse: v }))} />
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Off by default. Logging stores the whole body of every call in the event history —
+                      megabytes per call for image tagging. Turn it on to investigate, then off again.
+                    </p>
                   </div>
                 </>
               )}

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { downloadCsv, csvDate } from "@/lib/csv";
@@ -37,7 +38,18 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
   const [openEvent, setOpenEvent] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [form, setForm] = useState({ name: "", costLimitInUsd: "", revoked: false });
+  const [form, setForm] = useState({
+    name: "",
+    tags: "",
+    costLimitInUsd: "",
+    costLimitInUsdOverTime: "",
+    costLimitInUsdUnit: "d",
+    rateLimitOverTime: "",
+    rateLimitUnit: "d",
+    shouldLogRequest: false,
+    shouldLogResponse: false,
+    revoked: false,
+  });
   const [tab, setTab] = useState("edit");
 
   useEffect(() => {
@@ -45,7 +57,14 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
 
     setForm({
       name: apiKey.name || "",
+      tags: (apiKey.tags || []).join(", "),
       costLimitInUsd: apiKey.costLimitInUsd != null ? String(apiKey.costLimitInUsd) : "",
+      costLimitInUsdOverTime: apiKey.costLimitInUsdOverTime ? String(apiKey.costLimitInUsdOverTime) : "",
+      costLimitInUsdUnit: apiKey.costLimitInUsdUnit || "d",
+      rateLimitOverTime: apiKey.rateLimitOverTime ? String(apiKey.rateLimitOverTime) : "",
+      rateLimitUnit: apiKey.rateLimitUnit || "d",
+      shouldLogRequest: !!apiKey.shouldLogRequest,
+      shouldLogResponse: !!apiKey.shouldLogResponse,
       revoked: !!apiKey.revoked,
     });
     setSpend(null);
@@ -101,7 +120,13 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
   const save = async () => {
     if (!api || !apiKey?.keyId) return;
 
-    const body: any = { name: form.name, revoked: form.revoked };
+    const body: any = {
+      name: form.name,
+      revoked: form.revoked,
+      tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      shouldLogRequest: form.shouldLogRequest,
+      shouldLogResponse: form.shouldLogResponse,
+    };
 
     const limit = parseFloat(form.costLimitInUsd);
     if (form.costLimitInUsd !== "") {
@@ -111,6 +136,17 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
       }
       body.costLimitInUsd = limit;
     }
+
+    // Значение и единица едут только парой, и при нуле единица обязана быть
+    // пустой - иначе сервер отклонит всё обновление целиком. Пустое поле здесь
+    // и означает ноль, то есть снятие оконного лимита.
+    const overTime = parseFloat(form.costLimitInUsdOverTime) || 0;
+    body.costLimitInUsdOverTime = overTime;
+    body.costLimitInUsdUnit = overTime > 0 ? form.costLimitInUsdUnit : "";
+
+    const rate = parseInt(form.rateLimitOverTime) || 0;
+    body.rateLimitOverTime = rate;
+    body.rateLimitUnit = rate > 0 ? form.rateLimitUnit : "";
 
     setSaving(true);
     try {
@@ -183,6 +219,99 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
                   onChange={(e) => setForm((p) => ({ ...p, costLimitInUsd: e.target.value }))}
                 />
               </div>
+              <div>
+                <Label>Tags</Label>
+                <Input
+                  className="mt-1"
+                  value={form.tags}
+                  onChange={(e) => setForm((p) => ({ ...p, tags: e.target.value }))}
+                  placeholder="client, internal"
+                />
+              </div>
+
+              {/* Оконные лимиты. Пустое поле снимает лимит: значение и единица
+                  уходят парой, иначе сервер отклоняет обновление целиком. */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Cost Limit Over Time</Label>
+                  <Input
+                    className="mt-1"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.costLimitInUsdOverTime}
+                    onChange={(e) => setForm((p) => ({ ...p, costLimitInUsdOverTime: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label>Unit</Label>
+                  <Select
+                    value={form.costLimitInUsdUnit}
+                    onValueChange={(v) => setForm((p) => ({ ...p, costLimitInUsdUnit: v }))}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="h">Hour</SelectItem>
+                      <SelectItem value="d">Day</SelectItem>
+                      <SelectItem value="m">Month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Rate Limit Over Time</Label>
+                  <Input
+                    className="mt-1"
+                    type="number"
+                    min="0"
+                    value={form.rateLimitOverTime}
+                    onChange={(e) => setForm((p) => ({ ...p, rateLimitOverTime: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label>Unit</Label>
+                  <Select
+                    value={form.rateLimitUnit}
+                    onValueChange={(v) => setForm((p) => ({ ...p, rateLimitUnit: v }))}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="h">Hour</SelectItem>
+                      <SelectItem value="d">Day</SelectItem>
+                      <SelectItem value="m">Month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between">
+                  <Label>Log Requests</Label>
+                  <Switch
+                    checked={form.shouldLogRequest}
+                    onCheckedChange={(v) => setForm((p) => ({ ...p, shouldLogRequest: v }))}
+                  />
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <Label>Log Responses</Label>
+                  <Switch
+                    checked={form.shouldLogResponse}
+                    onCheckedChange={(v) => setForm((p) => ({ ...p, shouldLogResponse: v }))}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {form.shouldLogRequest || form.shouldLogResponse
+                    ? "On: every call of this key stores its whole body in the event history — megabytes per call for image tagging. Switch it off once you are done looking."
+                    : "Off: the Events tab shows what was called and what it cost, but not the bodies."}
+                </p>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <Label>Revoked</Label>
