@@ -263,6 +263,14 @@ func getMiddleware(cpm CustomProvidersManager, rm routeManager, pm PoliciesManag
 				"status:" + strconv.Itoa(c.Writer.Status()),
 			}, 1)
 
+			// Listing the catalogue costs nothing, names no model and returns the
+			// same thing to everyone holding the key. Its event carried the whole
+			// catalogue as a response body - the heaviest rows in the table -
+			// while reporting nothing anyone would look for.
+			if c.FullPath() == ModelsListPath && c.Request.Method == http.MethodGet {
+				return
+			}
+
 			evt := &event.Event{
 				Id:                   util.NewUuid(),
 				CreatedAt:            time.Now().Unix(),

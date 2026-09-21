@@ -8,6 +8,12 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// logListModelsResponse records that a catalogue went out, and how many models
+// were in it.
+//
+// The models themselves are deliberately left out: the catalogue is hundreds of
+// entries the provider publishes openly, and writing all of them on every
+// listing buried the rest of the log for nothing.
 func logListModelsResponse(log *zap.Logger, data []byte, prod bool) {
 	models := &goopenai.ModelsList{}
 	err := json.Unmarshal(data, models)
@@ -18,7 +24,7 @@ func logListModelsResponse(log *zap.Logger, data []byte, prod bool) {
 
 	if prod {
 		fields := []zapcore.Field{
-			zap.Any("models", models.Models),
+			zap.Int("count", len(models.Models)),
 		}
 
 		log.Info("openai list models response", fields...)

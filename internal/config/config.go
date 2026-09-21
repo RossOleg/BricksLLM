@@ -70,6 +70,12 @@ type Config struct {
 	CreditsExponent float64 `koanf:"credits_exponent" env:"CREDITS_EXPONENT" envDefault:"1"`
 	CreditsOffset   int64   `koanf:"credits_offset" env:"CREDITS_OFFSET" envDefault:"0"`
 	CreditsStep     int64   `koanf:"credits_step" env:"CREDITS_STEP" envDefault:"1"`
+
+	// ModelsCacheTtl is how long the provider's model catalogue is kept in redis.
+	// Listing it is free and the answer only changes when the provider ships a
+	// model, so the price of a stale entry is a new model showing up late. Zero
+	// turns the cache off and sends every listing upstream.
+	ModelsCacheTtl time.Duration `koanf:"models_cache_ttl" env:"MODELS_CACHE_TTL" envDefault:"1h"`
 }
 
 func prepareDotEnv(envFilePath string) error {

@@ -219,7 +219,21 @@ paths:
       tags:
         - OpenAI
       summary: Get OpenAI models
-      description: This endpoint is set up for retrieving OpenAI models. Documentation for this endpoint can be found [here](https://platform.openai.com/docs/api-reference/models/list).
+      description: >
+        This endpoint is set up for retrieving OpenAI models. Documentation for this
+        endpoint can be found [here](https://platform.openai.com/docs/api-reference/models/list).
+
+
+        The catalogue is narrowed to the `allowedModels` of the provider settings
+        attached to the key, so a picker built from it does not offer models every
+        request would refuse.
+
+
+        Answers are cached in redis per upstream key for `MODELS_CACHE_TTL` (one hour
+        by default; `0` switches the cache off). Listing is free and the catalogue
+        only changes when the provider ships a model, so the price of a cached answer
+        is a new model showing up late. A refused listing is never cached, and the
+        listing produces no event: it costs nothing and names no model.
 
   /api/providers/openai/v1/models/{model}:
     get:

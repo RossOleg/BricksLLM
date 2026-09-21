@@ -80,7 +80,7 @@ func CorsMiddleware() gin.HandlerFunc {
 	}
 }
 
-func NewProxyServer(log *zap.Logger, mode, privacyMode string, c cache, m KeyManager, rm routeManager, a authenticator, psm ProviderSettingsManager, cpm CustomProvidersManager, ks keyStorage, cs costStorage, clc costLimitCache, e estimator, ae anthropicEstimator, aoe azureEstimator, v validator, r recorder, pub publisher, rlm rateLimitManager, timeout time.Duration, ac accessCache, uac userAccessCache, pm PoliciesManager, scanner Scanner, cd CustomPolicyDetector, die deepinfraEstimator, um userManager, removeAgentHeaders bool, scale CreditsScale) (*ProxyServer, error) {
+func NewProxyServer(log *zap.Logger, mode, privacyMode string, c cache, m KeyManager, rm routeManager, a authenticator, psm ProviderSettingsManager, cpm CustomProvidersManager, ks keyStorage, cs costStorage, clc costLimitCache, e estimator, ae anthropicEstimator, aoe azureEstimator, v validator, r recorder, pub publisher, rlm rateLimitManager, timeout time.Duration, ac accessCache, uac userAccessCache, pm PoliciesManager, scanner Scanner, cd CustomPolicyDetector, die deepinfraEstimator, um userManager, removeAgentHeaders bool, scale CreditsScale, modelsCacheTtl time.Duration) (*ProxyServer, error) {
 	router := gin.New()
 	prod := mode == "production"
 	private := privacyMode == "strict"
@@ -116,7 +116,7 @@ func NewProxyServer(log *zap.Logger, mode, privacyMode string, c cache, m KeyMan
 	router.POST("/api/providers/openai/v1/moderations", getPassThroughHandler(prod, private, client))
 
 	// models
-	router.GET("/api/providers/openai/v1/models", getPassThroughHandler(prod, private, client))
+	router.GET(ModelsListPath, getListModelsHandler(prod, private, client, c, modelsCacheTtl))
 	router.GET("/api/providers/openai/v1/models/:model", getPassThroughHandler(prod, private, client))
 	router.DELETE("/api/providers/openai/v1/models/:model", getPassThroughHandler(prod, private, client))
 
@@ -646,10 +646,6 @@ func getPassThroughHandler(prod, private bool, client http.Client) gin.HandlerFu
 				logCreateModerationResponse(log, bytes, prod)
 			}
 
-			if c.FullPath() == "/api/providers/openai/v1/models" && c.Request.Method == http.MethodGet {
-				logListModelsResponse(log, bytes, prod)
-			}
-
 			if c.FullPath() == "/api/providers/openai/v1/models/:model" && c.Request.Method == http.MethodGet {
 				logRetrieveModelResponse(log, bytes, prod)
 			}
@@ -702,18 +698,6 @@ func getPassThroughHandler(prod, private bool, client http.Client) gin.HandlerFu
 			}
 
 			logOpenAiError(log, prod, errorRes)
-		}
-
-		// The catalogue is narrowed to what this key may actually use, so that a
-		// picker built from it does not offer models every request would refuse.
-		if c.FullPath() == "/api/providers/openai/v1/models" && c.Request.Method == http.MethodGet && res.StatusCode == http.StatusOK {
-			if filtered, changed := filterModelList(bytes, settingsFromContext(c.Get("settings"))); changed {
-				bytes = filtered
-
-				// The upstream length no longer describes the body, and it is about
-				// to be copied over verbatim.
-				res.Header.Del("Content-Length")
-			}
 		}
 
 		for name, values := range res.Header {
@@ -846,10 +830,6 @@ func buildProxyUrl(c *gin.Context) (string, error) {
 
 	if c.FullPath() == "/api/providers/openai/v1/moderations" && c.Request.Method == http.MethodPost {
 		return "https://api.openai.com/v1/moderations", nil
-	}
-
-	if c.FullPath() == "/api/providers/openai/v1/models" && c.Request.Method == http.MethodGet {
-		return "https://api.openai.com/v1/models", nil
 	}
 
 	if c.FullPath() == "/api/providers/openai/v1/models/:model" && c.Request.Method == http.MethodGet {

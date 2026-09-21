@@ -352,7 +352,7 @@ func main() {
 	scanner := pii.NewScanner(detector)
 	cd := custompolicy.NewOpenAiDetector(cfg.CustomPolicyDetectionTimeout, cfg.OpenAiApiKey)
 
-	ps, err := proxy.NewProxyServer(log, *modePtr, *privacyPtr, c, m, rm, a, psm, cpm, store, costStorage, costLimitCache, ce, ace, aoe, v, rec, messageBus, rlm, cfg.ProxyTimeout, accessCache, userAccessCache, pm, scanner, cd, die, um, cfg.RemoveUserAgent, proxy.NewCreditsScale(cfg.CreditsPerUsd, cfg.CreditsExponent, cfg.CreditsOffset, cfg.CreditsStep))
+	ps, err := proxy.NewProxyServer(log, *modePtr, *privacyPtr, c, m, rm, a, psm, cpm, store, costStorage, costLimitCache, ce, ace, aoe, v, rec, messageBus, rlm, cfg.ProxyTimeout, accessCache, userAccessCache, pm, scanner, cd, die, um, cfg.RemoveUserAgent, proxy.NewCreditsScale(cfg.CreditsPerUsd, cfg.CreditsExponent, cfg.CreditsOffset, cfg.CreditsStep), cfg.ModelsCacheTtl)
 	if err != nil {
 		log.Sugar().Fatalf("error creating proxy http server: %v", err)
 	}
