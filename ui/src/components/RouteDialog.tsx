@@ -38,13 +38,6 @@ const emptyStep = (): Step => ({
   deploymentId: "",
 });
 
-// Сервер принимает только эти модели (internal/manager/route.go) - список
-// подсказывает, но не ограничивает ввод: решает всё равно сервер.
-const MODELS: Record<string, string[]> = {
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "text-embedding-ada-002"],
-  azure: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-35-turbo", "ada"],
-};
-
 const NO_RETRY = "__none__";
 
 const RouteDialog: React.FC<{ open: boolean; onClose: () => void; onSaved: () => void }> = ({
@@ -61,6 +54,9 @@ const RouteDialog: React.FC<{ open: boolean; onClose: () => void; onSaved: () =>
   const [steps, setSteps] = useState<Step[]>([emptyStep()]);
   const [keys, setKeys] = useState<{ keyId: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
+  // Подсказки для поля модели. Своего списка здесь нет: сервер отдаёт тот же,
+  // по которому проверяет маршрут, - модели из таблицы цен.
+  const [models, setModels] = useState<Record<string, { chat: string[]; embeddings: string[] }>>({});
 
   // Поиск ключей по имени: id ключа нигде в панели не набирают руками.
   const [keyQuery, setKeyQuery] = useState("");
@@ -79,6 +75,14 @@ const RouteDialog: React.FC<{ open: boolean; onClose: () => void; onSaved: () =>
     setKeyQuery("");
     setFound([]);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !api) return;
+    api
+      .getRouteModels()
+      .then((m) => setModels(m || {}))
+      .catch(() => setModels({}));
+  }, [open, api]);
 
   const searchKeys = async () => {
     if (!api || !keyQuery.trim()) return;
@@ -260,8 +264,8 @@ const RouteDialog: React.FC<{ open: boolean; onClose: () => void; onSaved: () =>
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Tried in order. The server accepts only its built-in openai/azure model list (up to gpt-4o); newer models
-              are rejected here.
+              Tried in order. Any model from the gateway's price table works; chat and embedding models cannot be mixed
+              in one route.
             </p>
 
             <div className="mt-2 space-y-2">
@@ -335,10 +339,13 @@ const RouteDialog: React.FC<{ open: boolean; onClose: () => void; onSaved: () =>
               ))}
             </div>
 
-            {Object.entries(MODELS).map(([provider, models]) => (
+            {Object.entries(models).map(([provider, list]) => (
               <datalist key={provider} id={`route-models-${provider}`}>
-                {models.map((m) => (
+                {list.chat.map((m) => (
                   <option key={m} value={m} />
+                ))}
+                {list.embeddings.map((m) => (
+                  <option key={m} value={m} label="embeddings" />
                 ))}
               </datalist>
             ))}

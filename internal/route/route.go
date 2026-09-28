@@ -180,6 +180,13 @@ func (s *Step) DecorateChatCompletionRequest(req *goopenai.ChatCompletionRequest
 	}
 }
 
+// Models is what a route step may use with one provider. Chat and embeddings are
+// apart because a route cannot mix them.
+type Models struct {
+	Chat       []string `json:"chat"`
+	Embeddings []string `json:"embeddings"`
+}
+
 type Route struct {
 	Id            string       `json:"id"`
 	RetryStrategy string       `json:"retryStrategy"`

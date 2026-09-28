@@ -8,6 +8,8 @@ import (
 
 	internal_errors "github.com/bricks-cloud/bricksllm/internal/errors"
 	"github.com/bricks-cloud/bricksllm/internal/provider"
+	"github.com/bricks-cloud/bricksllm/internal/provider/azure"
+	"github.com/bricks-cloud/bricksllm/internal/provider/openai"
 	"github.com/bricks-cloud/bricksllm/internal/route"
 	"github.com/bricks-cloud/bricksllm/internal/util"
 )
@@ -87,168 +89,55 @@ func addDefaultValues(r *route.Route) {
 
 }
 
-func checkModelValidity(provider, model string) bool {
-	if provider == "azure" {
-		return contains(model, azureSupportedModels)
+// The models a route step may use come from the price tables of the providers,
+// not from a list kept here. This used to be four hardcoded slices that stopped
+// at gpt-4o and were never updated when models were added to the price table,
+// so a route could not use anything newer. A model that is not priced would be
+// recorded as free anyway, so "priced" is the right test for "supported".
+
+// modelKind is what a step's model does: routes may not mix the two, because
+// one request body cannot be both a chat completion and an embeddings call.
+type modelKind int
+
+const (
+	unknownModel modelKind = iota
+	chatModel
+	embeddingModel
+)
+
+func kindOfModel(provider, model string) modelKind {
+	switch provider {
+	case "openai":
+		if openai.IsEmbeddingModel(model) {
+			return embeddingModel
+		}
+		if openai.IsChatModel(model) {
+			return chatModel
+		}
+	case "azure":
+		if azure.IsEmbeddingModel(model) {
+			return embeddingModel
+		}
+		if azure.IsChatModel(model) {
+			return chatModel
+		}
 	}
 
-	if provider == "openai" {
-		return contains(model, openaiSupportedModels)
-	}
-
-	return false
+	return unknownModel
 }
 
-var (
-	azureSupportedModels = []string{
-		"gpt-4o-2024-08-26",
-		"gpt-4o-2024-05-13",
-		"gpt-4o",
-		"gpt-4o-mini",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-0125-preview",
-		"gpt-4-vision-preview",
-		"gpt-4-1106-preview",
-		"gpt-4-1106-vision-preview",
-		"gpt-4",
-		"gpt-4-0314",
-		"gpt-4-0613",
-		"gpt-4-32k",
-		"gpt-4-32k-0613",
-		"gpt-4-32k-0314",
-		"gpt-4-turbo",
-		"gpt-35-turbo",
-		"gpt-35-turbo-0125",
-		"gpt-35-turbo-1106",
-		"gpt-35-turbo-0301",
-		"gpt-35-turbo-instruct",
-		"gpt-35-turbo-0613",
-		"gpt-35-turbo-16k",
-		"gpt-35-turbo-16k-0613",
-		"ada",
-	}
+var supportedProviders = []string{
+	"openai",
+	"azure",
+}
 
-	openaiSupportedModels = []string{
-		"gpt-4o-2024-08-06",
-		"gpt-4o-2024-05-13",
-		"gpt-4o",
-		"gpt-4o-mini",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-0125-preview",
-		"gpt-4-vision-preview",
-		"gpt-4-1106-preview",
-		"gpt-4-1106-vision-preview",
-		"gpt-4",
-		"gpt-4-0314",
-		"gpt-4-0613",
-		"gpt-4-32k",
-		"gpt-4-32k-0613",
-		"gpt-4-32k-0314",
-		"gpt-4-turbo",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-1106-preview",
-		"gpt-4-turbo-preview",
-		"gpt-3.5-turbo",
-		"gpt-3.5-turbo-0125",
-		"gpt-3.5-turbo-1106",
-		"gpt-3.5-turbo-0301",
-		"gpt-3.5-turbo-instruct",
-		"gpt-3.5-turbo-0613",
-		"gpt-3.5-turbo-16k",
-		"gpt-3.5-turbo-16k-0613",
-		"text-embedding-ada-002",
+// GetRouteModels lists, per provider, the models a route step may use.
+func (m *RouteManager) GetRouteModels() map[string]route.Models {
+	return map[string]route.Models{
+		"openai": {Chat: openai.ChatModels(), Embeddings: openai.EmbeddingModels()},
+		"azure":  {Chat: azure.ChatModels(), Embeddings: azure.EmbeddingModels()},
 	}
-
-	supportedModels = []string{
-		"gpt-4o-2024-08-06",
-		"gpt-4o-2024-05-13",
-		"gpt-4o",
-		"gpt-4o-mini",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-0125-preview",
-		"gpt-4-vision-preview",
-		"gpt-4-1106-preview",
-		"gpt-4-1106-vision-preview",
-		"gpt-4",
-		"gpt-4-0314",
-		"gpt-4-0613",
-		"gpt-4-32k",
-		"gpt-4-32k-0613",
-		"gpt-4-32k-0314",
-		"gpt-4-turbo",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-1106-preview",
-		"gpt-4-turbo-preview",
-		"gpt-35-turbo",
-		"gpt-35-turbo-0125",
-		"gpt-35-turbo-1106",
-		"gpt-35-turbo-0301",
-		"gpt-35-turbo-instruct",
-		"gpt-35-turbo-0613",
-		"gpt-35-turbo-16k",
-		"gpt-35-turbo-16k-0613",
-		"gpt-3.5-turbo",
-		"gpt-3.5-turbo-0125",
-		"gpt-3.5-turbo-1106",
-		"gpt-3.5-turbo-0301",
-		"gpt-3.5-turbo-instruct",
-		"gpt-3.5-turbo-0613",
-		"gpt-3.5-turbo-16k",
-		"gpt-3.5-turbo-16k-0613",
-		"ada",
-		"text-embedding-ada-002",
-	}
-
-	adaModels = []string{
-		"ada",
-		"text-embedding-ada-002",
-		"text-embedding-3-large",
-		"text-embedding-3-small",
-	}
-
-	chatCompletionModels = []string{
-		"gpt-35-turbo",
-		"gpt-35-turbo-0125",
-		"gpt-35-turbo-1106",
-		"gpt-35-turbo-0301",
-		"gpt-35-turbo-instruct",
-		"gpt-35-turbo-0613",
-		"gpt-35-turbo-16k",
-		"gpt-35-turbo-16k-0613",
-		"gpt-4o-2024-08-06",
-		"gpt-4o-2024-05-13",
-		"gpt-4o",
-		"gpt-4o-mini",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-0125-preview",
-		"gpt-4-vision-preview",
-		"gpt-4-1106-preview",
-		"gpt-4-1106-vision-preview",
-		"gpt-4",
-		"gpt-4-0314",
-		"gpt-4-0613",
-		"gpt-4-32k",
-		"gpt-4-32k-0613",
-		"gpt-4-32k-0314",
-		"gpt-4-turbo",
-		"gpt-4-turbo-2024-04-09",
-		"gpt-4-1106-preview",
-		"gpt-4-turbo-preview",
-		"gpt-3.5-turbo",
-		"gpt-3.5-turbo-0125",
-		"gpt-3.5-turbo-1106",
-		"gpt-3.5-turbo-0301",
-		"gpt-3.5-turbo-instruct",
-		"gpt-3.5-turbo-0613",
-		"gpt-3.5-turbo-16k",
-		"gpt-3.5-turbo-16k-0613",
-	}
-
-	supportedProviders = []string{
-		"openai",
-		"azure",
-	}
-)
+}
 
 func contains(target string, source []string) bool {
 	for _, s := range source {
@@ -283,7 +172,7 @@ func (m *RouteManager) validateRoute(r *route.Route) error {
 		fields = append(fields, "retryStrategy")
 	}
 
-	containAda := false
+	routeKind := unknownModel
 
 	for index, step := range r.Steps {
 		if len(step.Provider) == 0 {
@@ -403,25 +292,14 @@ func (m *RouteManager) validateRoute(r *route.Route) error {
 			}
 		}
 
-		if !contains(step.Model, supportedModels) {
-			return fmt.Errorf("steps.[%d].model is not supported. Only chat completion and embeddings model are supported", index)
+		kind := kindOfModel(step.Provider, step.Model)
+		if kind == unknownModel {
+			return fmt.Errorf("steps.[%d].model %s is not in the %s price table, so the gateway could not bill it", index, step.Model, step.Provider)
 		}
 
-		if !checkModelValidity(step.Provider, step.Model) {
-			return fmt.Errorf("model: %s is not supported for provider: %s", step.Model, step.Provider)
-		}
-
-		if !containAda && contains(step.Model, adaModels) {
-			containAda = true
-		}
-	}
-
-	for _, step := range r.Steps {
-		if containAda && !contains(step.Model, adaModels) {
-			return errors.New("steps must have congruent models. Chat completion and embedding models cannot be in the same route config")
-		}
-
-		if !containAda && !contains(step.Model, chatCompletionModels) {
+		if index == 0 {
+			routeKind = kind
+		} else if kind != routeKind {
 			return errors.New("steps must have congruent models. Chat completion and embedding models cannot be in the same route config")
 		}
 	}

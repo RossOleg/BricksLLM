@@ -17,6 +17,16 @@ type RouteManager interface {
 	GetRoute(id string) (*route.Route, error)
 	GetRoutes() ([]*route.Route, error)
 	CreateRoute(r *route.Route) (*route.Route, error)
+	GetRouteModels() map[string]route.Models
+}
+
+// getGetRouteModelsHandler tells the panel which models a route step may use.
+// The list comes from the price tables, the same place route validation reads
+// it from, so the panel never offers a model the server would then refuse.
+func getGetRouteModelsHandler(m RouteManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, m.GetRouteModels())
+	}
 }
 
 func getCreateRouteHandler(m RouteManager, prod bool) gin.HandlerFunc {

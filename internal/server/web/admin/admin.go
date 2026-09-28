@@ -124,6 +124,7 @@ func NewAdminServer(log *zap.Logger, mode string, m KeyManager, krm KeyReporting
 	router.PATCH("/api/custom/providers/:id", getUpdateCustomProvidersHandler(cpm, prod))
 
 	router.POST("/api/routes", getCreateRouteHandler(rm, prod))
+	router.GET("/api/route-models", getGetRouteModelsHandler(rm))
 	router.GET("/api/routes/:id", getGetRouteHandler(rm, prod))
 	router.GET("/api/routes", getGetRoutesHandler(rm, prod))
 	router.DELETE("/api/routes/:id", getDeleteRouteHandler(rm, prod))
@@ -177,6 +178,7 @@ func (as *AdminServer) Run() {
 		as.log.Info("PORT 8001 | GET    | /api/routes/:id is set up for retrieving a route")
 		as.log.Info("PORT 8001 | GET    | /api/routes is set up for retrieving routes")
 		as.log.Info("PORT 8001 | DELETE | /api/routes/:id is set up for deleting a route")
+		as.log.Info("PORT 8001 | GET    | /api/route-models is set up for listing the models a route may use")
 		as.log.Info("PORT 8001 | POST   | /api/policies is set up for creating a policy")
 		as.log.Info("PORT 8001 | PATCH  | /api/policies/:id is set up for retrieving a policy")
 		as.log.Info("PORT 8001 | GET    | /api/policies is set up for retrieving policies")

@@ -73,6 +73,10 @@ export class BricksApi {
   listRoutes() { return this.request<any[]>("GET", "/api/routes"); }
   createRoute(data: any) { return this.request<any>("POST", "/api/routes", data); }
   deleteRoute(id: string) { return this.request<any>("DELETE", `/api/routes/${id}`); }
+  /** Модели, доступные шагу маршрута, по провайдерам: сервер берёт их из таблицы цен. */
+  getRouteModels() {
+    return this.request<Record<string, { chat: string[]; embeddings: string[] }>>("GET", "/api/route-models");
+  }
 
   // Custom Providers
   listCustomProviders() { return this.request<any[]>("GET", "/api/custom/providers"); }
