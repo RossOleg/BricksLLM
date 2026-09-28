@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bricks-cloud/bricksllm/internal/policy"
@@ -11,6 +12,22 @@ import (
 	"github.com/bricks-cloud/bricksllm/internal/util"
 	"github.com/gin-gonic/gin"
 )
+
+// policyTags accepts tags both as repeated params (?tags=a&tags=b) and as one
+// comma-separated value (?tags=a,b), which is what a form sends.
+func policyTags(values []string) []string {
+	tags := []string{}
+
+	for _, value := range values {
+		for _, tag := range strings.Split(value, ",") {
+			if tag = strings.TrimSpace(tag); len(tag) != 0 {
+				tags = append(tags, tag)
+			}
+		}
+	}
+
+	return tags
+}
 
 func getCreatePolicyHandler(pm PoliciesManager, prod bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -190,20 +207,11 @@ func getGetPoliciesByTagsHandler(pm PoliciesManager, prod bool) gin.HandlerFunc 
 			return
 		}
 
-		tags := c.QueryArray("tags")
-		if len(tags) == 0 {
-			c.JSON(http.StatusBadRequest, &ErrorResponse{
-				Type:     "/errors/tags-empty",
-				Title:    "query param tags is empty",
-				Status:   http.StatusBadRequest,
-				Detail:   "query param tags is required for retrieving policies.",
-				Instance: path,
-			})
+		// No tags lists every policy: a panel cannot offer policies to pick from
+		// if it first has to guess their tags.
+		tags := policyTags(c.QueryArray("tags"))
 
-			return
-		}
-
-		policies, err := pm.GetPoliciesByTags(c.QueryArray("tags"))
+		policies, err := pm.GetPoliciesByTags(tags)
 		if err != nil {
 			errType := "internal"
 

@@ -350,7 +350,12 @@ func (s *Store) GetPoliciesByTags(tags []string) ([]*policy.Policy, error) {
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), s.wt)
 	defer cancel()
 
-	rows, err := s.db.QueryContext(ctxTimeout, "SELECT * FROM policies WHERE tags @> $1", pq.Array(tags))
+	query, args := "SELECT * FROM policies ORDER BY created_at DESC", []any{}
+	if len(tags) != 0 {
+		query, args = "SELECT * FROM policies WHERE tags @> $1 ORDER BY created_at DESC", []any{pq.Array(tags)}
+	}
+
+	rows, err := s.db.QueryContext(ctxTimeout, query, args...)
 	if err != nil {
 		return nil, err
 	}
