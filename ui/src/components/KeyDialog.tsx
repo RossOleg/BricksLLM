@@ -264,7 +264,10 @@ const KeyDialog: React.FC<{
           </TabsList>
 
           {isFull && (
-            <TabsContent value="edit" className="mt-0 min-h-0 flex-1 overflow-y-auto pt-3">
+            <TabsContent value="edit" className="mt-0 min-h-0 flex-1 overflow-y-auto pt-3 data-[state=inactive]:hidden">
+              {/* data-[state=inactive]:hidden у обеих вкладок: Radix оставляет
+                  неактивную в DOM с атрибутом hidden, а класс flex его перебивает,
+                  и пустая Events съедала половину высоты под Edit. */}
               {/* Форма не тянется на всю ширину окна: поля в 1500px читать неудобно. */}
               <div className="max-w-3xl space-y-3 pr-2">
                 <div>
@@ -420,7 +423,7 @@ const KeyDialog: React.FC<{
           )}
 
           {isFull && (
-            <TabsContent value="events" className="mt-0 flex min-h-0 flex-1 flex-col pt-3">
+            <TabsContent value="events" className="mt-0 flex min-h-0 flex-1 flex-col pt-3 data-[state=inactive]:hidden">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Select value={span} onValueChange={(v) => setSpan(v as Span)}>
                   <SelectTrigger className="w-36">
