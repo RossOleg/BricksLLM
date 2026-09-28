@@ -8,6 +8,8 @@ type KeyReporting struct {
 type KeyRequest struct {
 	KeyIds      []string `json:"keyIds"`
 	Tags        []string `json:"tags"`
+	// Untagged keeps only keys created without any tag.
+	Untagged    bool     `json:"untagged"`
 	Name        string   `json:"name"`
 	Revoked     *bool    `json:"revoked"`
 	Limit       int      `json:"limit"`

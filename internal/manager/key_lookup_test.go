@@ -70,7 +70,7 @@ func (s *refusingStore) GetKeys(tags, keyIds []string, provider string) ([]*key.
 	return nil, nil
 }
 
-func (s *refusingStore) GetKeysV2(tags, keyIds []string, revoked *bool, limit, offset int, name, order string, returnCount bool) (*key.GetKeysResponse, error) {
+func (s *refusingStore) GetKeysV2(tags []string, untagged bool, keyIds []string, revoked *bool, limit, offset int, name, order string, returnCount bool) (*key.GetKeysResponse, error) {
 	s.t.Fatal("unexpected call")
 	return nil, nil
 }

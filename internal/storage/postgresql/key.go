@@ -209,62 +209,45 @@ func (s *Store) GetKeys(tags, keyIds []string, provider string) ([]*key.Response
 	return keys, nil
 }
 
-func (s *Store) GetKeysV2(tags, keyIds []string, revoked *bool, limit, offset int, name, order string, returnCount bool) (*key.GetKeysResponse, error) {
+func (s *Store) GetKeysV2(tags []string, untagged bool, keyIds []string, revoked *bool, limit, offset int, name, order string, returnCount bool) (*key.GetKeysResponse, error) {
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), s.rt)
 	defer cancel()
 
-	args := []any{}
-
-	countQuery := "SELECT COUNT(*) FROM keys"
-
-	query := "SELECT * FROM keys"
-
-	index := 1
-
-	if len(tags) != 0 || len(keyIds) != 0 || revoked != nil || len(name) != 0 {
-		query += " WHERE "
-		countQuery += " WHERE "
-	}
+	// Every filter goes through a placeholder. The name used to be pasted into
+	// the SQL text, and this list is open to support sessions too.
+	qa := &queryArgs{}
+	conditions := []string{}
 
 	if len(tags) != 0 {
-		args = append(args, pq.Array(tags))
-		index += 1
-		query += "tags @> $1"
-		countQuery += "tags @> $1"
+		conditions = append(conditions, "tags @> "+qa.next(pq.Array(tags)))
+	}
+
+	// A key created without tags stores either NULL or an empty array,
+	// depending on how it was written; both mean "no tag".
+	if untagged {
+		conditions = append(conditions, "COALESCE(cardinality(tags), 0) = 0")
 	}
 
 	if len(keyIds) != 0 {
-		if index > 1 {
-			query += " AND "
-			countQuery += " AND "
-		}
-
-		args = append(args, pq.Array(keyIds))
-		query += fmt.Sprintf("key_id = ANY($%d)", index)
-		countQuery += fmt.Sprintf("key_id = ANY($%d)", index)
-		index += 1
+		conditions = append(conditions, "key_id = ANY("+qa.next(pq.Array(keyIds))+")")
 	}
 
 	if revoked != nil {
-		if index > 1 {
-			query += " AND "
-			countQuery += " AND "
-		}
-
-		args = append(args, *revoked)
-		query += fmt.Sprintf("revoked = $%d", index)
-		countQuery += fmt.Sprintf("revoked = $%d", index)
+		conditions = append(conditions, "revoked = "+qa.next(*revoked))
 	}
 
 	if len(name) != 0 {
-		if index > 1 {
-			query += " AND "
-			countQuery += " AND "
-		}
-
-		query += fmt.Sprintf("LOWER(name) LIKE LOWER('%%%s%%')", name)
-		countQuery += fmt.Sprintf("LOWER(name) LIKE LOWER('%%%s%%')", name)
+		conditions = append(conditions, "LOWER(name) LIKE LOWER("+qa.next("%"+escapeLike(name)+"%")+")")
 	}
+
+	where := ""
+	if len(conditions) != 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	args := qa.values
+	countQuery := "SELECT COUNT(*) FROM keys" + where
+	query := "SELECT * FROM keys" + where
 
 	qorder := "DESC"
 	if strings.ToLower(order) == "asc" {
@@ -356,6 +339,12 @@ func (s *Store) GetKeysV2(tags, keyIds []string, revoked *bool, limit, offset in
 	}
 
 	return result, nil
+}
+
+// escapeLike makes a search string match itself: without it a "%" or "_" typed
+// into the name filter would act as a wildcard.
+func escapeLike(value string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(value)
 }
 
 func (s *Store) GetKeyByHash(hash string) (*key.ResponseKey, error) {
