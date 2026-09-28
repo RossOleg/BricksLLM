@@ -24,6 +24,11 @@ const AVAILABLE_TAGS = ["client", "daminion", "trial", "newyearevent"];
 // Здесь это только подпись на форме - решает сервер, он же и проставляет тег.
 const SUPPORT_TAG = "client";
 
+// Отбор ключей, созданных без единого тега. Radix Select не принимает пустую
+// строку значением, отсюда метки вместо "".
+const NO_TAG = "__none__";
+const ANY_TAG = "__any__";
+
 
 
 function generateKey() {
@@ -104,7 +109,7 @@ const KeysPage: React.FC = () => {
   const [spend, setSpend] = useState<Record<string, number>>({});
 
   // Search
-  const [searchTag, setSearchTag] = useState("");
+  const [searchTag, setSearchTag] = useState(ANY_TAG);
   const [searchName, setSearchName] = useState("");
 
   // Настройки провайдера для выбора при создании ключа.
@@ -126,6 +131,9 @@ const KeysPage: React.FC = () => {
     rateLimitOverTime: "",
     rateLimitUnit: "d",
     ttl: "",
+    // Ключ без тега API принимает, но выбрать это надо явно: иначе забытый тег
+    // неотличим от сознательно пустого, а такой ключ не найдётся ни в одной группе.
+    noTag: false,
     // Выключено по умолчанию: ключ с логированием пишет тело каждого запроса и
     // ответа в events, а у разметки картинок это мегабайты на вызов.
     shouldLogRequest: false,
@@ -156,14 +164,15 @@ const KeysPage: React.FC = () => {
 
   const fetchKeys = async () => {
     if (!api) return;
-    if (!searchTag && !searchName) {
-      toast.error("Enter a tag or name to search");
+    if (searchTag === ANY_TAG && !searchName) {
+      toast.error("Choose a tag or enter a name to search");
       return;
     }
     setLoading(true);
     try {
       const body: any = { returnCount: true, order: "asc" };
-      if (searchTag) body.tags = [searchTag.trim()];
+      if (searchTag === NO_TAG) body.untagged = true;
+      else if (searchTag !== ANY_TAG) body.tags = [searchTag];
       if (searchName) body.name = searchName.trim();
       const data = await api.listKeys(body);
       // Этот эндпоинт отдаёт { keys, count }, а не голый массив - в отличие от
@@ -215,6 +224,12 @@ const KeysPage: React.FC = () => {
 
     // Ключ без потолка тратит, пока его не заметят. Сервер это тоже проверяет,
     // здесь - чтобы сказать об этом до отправки.
+    const tags = form.tags.split(",").map((s) => s.trim()).filter(Boolean);
+    if (isFull && !form.noTag && tags.length === 0) {
+      toast.error("Choose a tag, or No tag if the key should have none");
+      return;
+    }
+
     const costLimit = parseFloat(form.costLimitInUsd);
     if (!isFull && !(costLimit > 0)) {
       toast.error("Set a cost limit greater than zero");
@@ -238,7 +253,7 @@ const KeysPage: React.FC = () => {
       // Остальные способы задать лимит доступны только в полном режиме -
       // сервер отклонит их у support-сессии, так что и не отправляем.
       if (isFull) {
-        if (form.tags) body.tags = form.tags.split(",").map(s => s.trim());
+        if (!form.noTag) body.tags = tags;
         if (form.costLimitInUsdOverTime) body.costLimitInUsdOverTime = parseFloat(form.costLimitInUsdOverTime);
         if (form.costLimitInUsdOverTime) body.costLimitInUsdUnit = form.costLimitInUsdUnit;
         if (form.rateLimitOverTime) body.rateLimitOverTime = parseInt(form.rateLimitOverTime);
@@ -253,7 +268,7 @@ const KeysPage: React.FC = () => {
       setForm({
         name: "", key: generateKey(), tags: "",
         costLimitInUsd: "", costLimitInUsdOverTime: "", costLimitInUsdUnit: "d",
-        rateLimitOverTime: "", rateLimitUnit: "d", ttl: "",
+        rateLimitOverTime: "", rateLimitUnit: "d", ttl: "", noTag: false,
         shouldLogRequest: false, shouldLogResponse: false,
       });
     } catch (e: any) {
@@ -321,10 +336,10 @@ const KeysPage: React.FC = () => {
               </div>
               {isFull ? (
                 <div>
-                  <Label>Tags</Label>
+                  <Label>Tags *</Label>
                   <div className="flex gap-2 flex-wrap mt-1">
                     {AVAILABLE_TAGS.map(t => {
-                      const selected = form.tags.split(",").map(s => s.trim()).filter(Boolean).includes(t);
+                      const selected = !form.noTag && form.tags.split(",").map(s => s.trim()).filter(Boolean).includes(t);
                       return (
                         <Button
                           key={t}
@@ -334,14 +349,25 @@ const KeysPage: React.FC = () => {
                           onClick={() => {
                             const current = form.tags.split(",").map(s => s.trim()).filter(Boolean);
                             const next = selected ? current.filter(x => x !== t) : [...current, t];
-                            setForm(p => ({ ...p, tags: next.join(", ") }));
+                            setForm(p => ({ ...p, tags: next.join(", "), noTag: false }));
                           }}
                         >
                           {t}
                         </Button>
                       );
                     })}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={form.noTag ? "default" : "outline"}
+                      onClick={() => setForm(p => ({ ...p, noTag: !p.noTag, tags: "" }))}
+                    >
+                      No tag
+                    </Button>
                   </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Pick at least one tag, or No tag. Untagged keys are found with the No tag filter.
+                  </p>
                 </div>
               ) : (
                 <div>
@@ -437,11 +463,13 @@ const KeysPage: React.FC = () => {
           <div className="flex-1">
             <Label className="text-xs text-muted-foreground">Search by Tag</Label>
             <Select value={searchTag} onValueChange={setSearchTag}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select tag" /></SelectTrigger>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value={ANY_TAG}>Any tag</SelectItem>
                 {AVAILABLE_TAGS.map(t => (
                   <SelectItem key={t} value={t}>{t}</SelectItem>
                 ))}
+                <SelectItem value={NO_TAG}>No tag</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -493,7 +521,7 @@ const KeysPage: React.FC = () => {
         )}
 
         {!searched ? (
-          <EmptyState icon={<KeyRound className="h-6 w-6" />} title="Search for keys" description="Enter a tag or name to find keys" />
+          <EmptyState icon={<KeyRound className="h-6 w-6" />} title="Search for keys" description="Choose a tag — or No tag — or enter a name to find keys" />
         ) : shownKeys.length === 0 ? (
           <EmptyState
             icon={<KeyRound className="h-6 w-6" />}
