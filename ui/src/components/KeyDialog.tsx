@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { DateRange } from "react-day-picker";
 import { useApi } from "@/hooks/useApi";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,6 +14,8 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { downloadCsv, csvDate } from "@/lib/csv";
 import EventDetails from "@/components/EventDetails";
+import DateRangeField, { toPeriod } from "@/components/DateRangeField";
+import { daminionFields } from "@/lib/payload";
 
 /**
  * Карточка ключа: что он потратил, что в нём можно поправить и что им делали.
@@ -22,6 +25,12 @@ import EventDetails from "@/components/EventDetails";
  * полному доступу: в событиях лежат промпты и картинки клиентов.
  */
 const DAY = 24 * 60 * 60;
+
+/** Период истории: последние N дней или свой диапазон. */
+type Span = "30" | "60" | "90" | "custom";
+
+/** Значение фильтра "без отбора". Пустую строку Select не принимает. */
+const ALL = "__all__";
 
 const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: () => void }> = ({
   apiKey,
@@ -36,6 +45,10 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
   const [loadingEvents, setLoadingEvents] = useState(false);
   // Раскрытое событие: тела грузятся по id и только для него.
   const [openEvent, setOpenEvent] = useState<string | null>(null);
+  const [span, setSpan] = useState<Span>("30");
+  const [range, setRange] = useState<DateRange | undefined>();
+  const [catalog, setCatalog] = useState(ALL);
+  const [mediaType, setMediaType] = useState(ALL);
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({
@@ -70,6 +83,10 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
     setSpend(null);
     setEvents([]);
     setOpenEvent(null);
+    setSpan("30");
+    setRange(undefined);
+    setCatalog(ALL);
+    setMediaType(ALL);
     setTab(isFull ? "edit" : "info");
   }, [apiKey, isFull]);
 
@@ -97,21 +114,64 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
   const loadEvents = useCallback(async () => {
     if (!api || !apiKey?.keyId) return;
 
-    setLoadingEvents(true);
-    try {
+    let period: { start: number; end: number } | null;
+    if (span === "custom") {
+      // Пока диапазон не выбран, спрашивать нечего: API без границ ключ не примет.
+      period = toPeriod(range);
+      if (!period) {
+        setEvents([]);
+        return;
+      }
+    } else {
       const now = Math.floor(Date.now() / 1000);
+      period = { start: now - Number(span) * DAY, end: now };
+    }
+
+    setLoadingEvents(true);
+    setOpenEvent(null);
+    try {
       const list = await api.listEvents({
         keyIds: apiKey.keyId,
-        start: String(now - 30 * DAY),
-        end: String(now),
+        start: String(period.start),
+        end: String(period.end),
       });
-      setEvents(Array.isArray(list) ? list : []);
+      // Поля Daminion разбираем один раз здесь, а не на каждой перерисовке:
+      // метаданные приходят base64, и декодировать их на тысячах строк не бесплатно.
+      setEvents(Array.isArray(list) ? list.map((e: any) => ({ ...e, daminion: daminionFields(e) })) : []);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
       setLoadingEvents(false);
     }
-  }, [api, apiKey?.keyId]);
+  }, [api, apiKey?.keyId, span, range]);
+
+  const catalogs = useMemo(
+    () => [...new Set<string>(events.map((e) => e.daminion.catalog).filter(Boolean))].sort(),
+    [events],
+  );
+  const mediaTypes = useMemo(
+    () => [...new Set<string>(events.map((e) => e.daminion.mediaType).filter(Boolean))].sort(),
+    [events],
+  );
+
+  const shown = useMemo(
+    () =>
+      events.filter(
+        (e) =>
+          (catalog === ALL || e.daminion.catalog === catalog) &&
+          (mediaType === ALL || e.daminion.mediaType === mediaType),
+      ),
+    [events, catalog, mediaType],
+  );
+
+  // Итог по отобранному: сколько запросов, сколько разных элементов и во что обошлись.
+  const totals = useMemo(
+    () => ({
+      cost: shown.reduce((sum, e) => sum + (e.cost_in_usd || 0), 0),
+      items: new Set(shown.map((e) => e.custom_id).filter(Boolean)).size,
+    }),
+    [shown],
+  );
 
   useEffect(() => {
     if (tab === "events") loadEvents();
@@ -167,7 +227,15 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
 
   return (
     <Dialog open={!!apiKey} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-3xl">
+      {/* События разбирают по десятку колонок, и в узком окне им тесно: на этой
+          вкладке окно растягивается почти на весь экран. */}
+      <DialogContent
+        className={
+          tab === "events"
+            ? "flex h-[92vh] w-[96vw] max-w-[96vw] flex-col xl:max-w-screen-2xl"
+            : "sm:max-w-3xl"
+        }
+      >
         <DialogHeader>
           <DialogTitle>{apiKey.name || apiKey.keyId}</DialogTitle>
         </DialogHeader>
@@ -189,7 +257,7 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
           </div>
         </div>
 
-        <Tabs value={tab} onValueChange={setTab}>
+        <Tabs value={tab} onValueChange={setTab} className={tab === "events" ? "flex min-h-0 flex-1 flex-col" : undefined}>
           <TabsList>
             {isFull && <TabsTrigger value="edit">Edit</TabsTrigger>}
             {!isFull && <TabsTrigger value="info">Details</TabsTrigger>}
@@ -347,46 +415,106 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
           )}
 
           {isFull && (
-            <TabsContent value="events" className="pt-3">
+            <TabsContent value="events" className="mt-0 flex min-h-0 flex-1 flex-col pt-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Select value={span} onValueChange={(v) => setSpan(v as Span)}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="30">Last 30 days</SelectItem>
+                    <SelectItem value="60">Last 60 days</SelectItem>
+                    <SelectItem value="90">Last 90 days</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+                {span === "custom" && <DateRangeField className="w-72" value={range} onChange={setRange} />}
+
+                {/* Каталог и тип медиа приходят от Daminion в X-METADATA. У ключей без
+                    него списки пусты, и фильтры просто выключены. */}
+                <Select value={catalog} onValueChange={setCatalog} disabled={catalogs.length === 0}>
+                  <SelectTrigger className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All catalogs</SelectItem>
+                    {catalogs.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={mediaType} onValueChange={setMediaType} disabled={mediaTypes.length === 0}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All types</SelectItem>
+                    {mediaTypes.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <div className="ml-auto flex items-center gap-4">
+                  {!loadingEvents && shown.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      {shown.length} requests · {totals.items} items · ${totals.cost.toFixed(4)}
+                    </span>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingEvents || shown.length === 0}
+                    onClick={() =>
+                      downloadCsv(`events-${apiKey.keyId}`, shown, [
+                        { header: "Time", value: (e: any) => csvDate(e.created_at) },
+                        { header: "Catalog", value: (e: any) => e.daminion.catalog },
+                        { header: "Media type", value: (e: any) => e.daminion.mediaType },
+                        { header: "Item id", value: (e: any) => e.daminion.itemId },
+                        { header: "Item guid", value: (e: any) => e.daminion.itemGuid },
+                        { header: "Model", value: (e: any) => e.model },
+                        { header: "Status", value: (e: any) => e.status },
+                        { header: "Cost USD", value: (e: any) => e.cost_in_usd },
+                        { header: "Prompt tokens", value: (e: any) => e.prompt_token_count },
+                        { header: "Completion tokens", value: (e: any) => e.completion_token_count },
+                        { header: "Latency ms", value: (e: any) => e.latency_in_ms },
+                        { header: "Method", value: (e: any) => e.method },
+                        { header: "Path", value: (e: any) => e.path },
+                      ])
+                    }
+                  >
+                    Export CSV
+                  </Button>
+                </div>
+              </div>
+
               {loadingEvents ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : events.length === 0 ? (
+              ) : span === "custom" && !range?.from ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Pick a period</p>
+              ) : shown.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">
-                  No requests in the last 30 days
+                  {events.length === 0 ? "No requests in this period" : "No requests match the filters"}
                 </p>
               ) : (
                 <>
-                  <div className="mb-2 flex justify-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        downloadCsv(`events-${apiKey.keyId}`, events, [
-                          { header: "Time", value: (e: any) => csvDate(e.created_at) },
-                          { header: "Model", value: (e: any) => e.model },
-                          { header: "Status", value: (e: any) => e.status },
-                          { header: "Cost USD", value: (e: any) => e.cost_in_usd },
-                          { header: "Prompt tokens", value: (e: any) => e.prompt_token_count },
-                          { header: "Completion tokens", value: (e: any) => e.completion_token_count },
-                          { header: "Latency ms", value: (e: any) => e.latency_in_ms },
-                          { header: "Method", value: (e: any) => e.method },
-                          { header: "Path", value: (e: any) => e.path },
-                        ])
-                      }
-                    >
-                      Export CSV
-                    </Button>
-                  </div>
                   <p className="mb-2 text-xs text-muted-foreground">
                     Click a request to see what was sent and what came back.
                   </p>
-                  <div className="max-h-80 overflow-y-auto rounded-lg border border-border">
+                  <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
                     <Table>
-                      <TableHeader>
+                      <TableHeader className="sticky top-0 z-10 bg-background">
                         <TableRow className="hover:bg-transparent">
                           <TableHead>Time</TableHead>
+                          <TableHead>Catalog</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Item</TableHead>
                           <TableHead>Endpoint</TableHead>
                           <TableHead>Model</TableHead>
                           <TableHead>Status</TableHead>
@@ -396,14 +524,20 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {events.map((e: any) => (
+                        {shown.map((e: any) => (
                           <React.Fragment key={e.id}>
                             <TableRow
                               className="cursor-pointer"
                               onClick={() => setOpenEvent((current) => (current === e.id ? null : e.id))}
                             >
-                              <TableCell className="text-xs text-muted-foreground">
+                              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                                 {e.created_at ? new Date(e.created_at * 1000).toLocaleString() : "—"}
+                              </TableCell>
+                              <TableCell className="text-xs">{e.daminion.catalog || "—"}</TableCell>
+                              <TableCell className="text-xs">{e.daminion.mediaType || "—"}</TableCell>
+                              {/* Guid длинный и нужен редко: он в подсказке, в карточке события и в CSV. */}
+                              <TableCell className="font-mono text-xs" title={e.custom_id || undefined}>
+                                {e.daminion.itemId || "—"}
                               </TableCell>
                               {/* Путь показываем хвостом: общий префикс /api/providers/... у всех
                                   одинаковый и только мешает читать. Полный - в подсказке и в CSV. */}
@@ -431,7 +565,7 @@ const KeyDialog: React.FC<{ apiKey: any | null; onClose: () => void; onSaved: ()
 
                             {openEvent === e.id && (
                               <TableRow className="hover:bg-transparent">
-                                <TableCell colSpan={7} className="py-0">
+                                <TableCell colSpan={10} className="py-0">
                                   <EventDetails eventId={e.id} />
                                 </TableCell>
                               </TableRow>

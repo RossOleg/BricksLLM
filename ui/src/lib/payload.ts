@@ -75,3 +75,54 @@ export function downloadText(name: string, text: string) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Метаданные события - заголовок X-METADATA.
+ *
+ * Колонка JSONB, но в Go это []byte, и в ответ API она приходит тоже строкой
+ * base64. События, записанные до правки заголовка, хранят JSON дважды
+ * закодированным - строкой с объектом внутри; такие разбираем второй раз.
+ * Всё, что объектом не оказалось, считаем отсутствием метаданных.
+ */
+export function parseMetadata(raw: unknown): Record<string, unknown> {
+  let value: unknown = raw;
+
+  if (typeof value === "string") value = parseJson(decodeBody(value));
+  if (typeof value === "string") value = parseJson(value);
+
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Что Daminion кладёт в событие: каталог и тип медиа - из X-METADATA, элемент - из X-CUSTOM-EVENT-ID. */
+export interface DaminionFields {
+  catalog: string;
+  mediaType: string;
+  /** Id элемента внутри каталога. */
+  itemId: string;
+  /** Guid элемента: id уникален только в своём каталоге. */
+  itemGuid: string;
+}
+
+export function daminionFields(event: { custom_id?: string; metadata?: unknown }): DaminionFields {
+  const meta = parseMetadata(event.metadata);
+  const customId = event.custom_id ?? "";
+
+  // X-CUSTOM-EVENT-ID приходит как "<id>:<guid>". Без двоеточия это чужой
+  // custom id, и показываем его целиком.
+  const colon = customId.indexOf(":");
+
+  return {
+    catalog: typeof meta.catalog === "string" ? meta.catalog : "",
+    mediaType: typeof meta.mediaType === "string" ? meta.mediaType : "",
+    itemId: colon < 0 ? customId : customId.slice(0, colon),
+    itemGuid: colon < 0 ? "" : customId.slice(colon + 1),
+  };
+}

@@ -3,7 +3,7 @@ import { useApi } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { decodeBody, prettyJson, preview, formatSize, downloadText } from "@/lib/payload";
+import { decodeBody, prettyJson, preview, formatSize, downloadText, parseMetadata, daminionFields } from "@/lib/payload";
 
 /**
  * Тела одного события.
@@ -55,7 +55,7 @@ const Body: React.FC<{ title: string; raw: unknown; fileName: string }> = ({ tit
         </p>
       ) : (
         <>
-          <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-xs whitespace-pre-wrap break-all">
+          <pre className="max-h-96 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-xs whitespace-pre-wrap break-all">
             {shown}
           </pre>
           {truncated && (
@@ -78,6 +78,7 @@ type EventDetail = {
   correlationId?: string;
   custom_id?: string;
   provider?: string;
+  metadata?: unknown;
 };
 
 const EventDetails: React.FC<{ eventId: string }> = ({ eventId }) => {
@@ -120,6 +121,9 @@ const EventDetails: React.FC<{ eventId: string }> = ({ eventId }) => {
     );
   }
 
+  const metadata = parseMetadata(event.metadata);
+  const item = daminionFields(event);
+
   return (
     <div className="space-y-3 py-2">
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
@@ -131,13 +135,41 @@ const EventDetails: React.FC<{ eventId: string }> = ({ eventId }) => {
             Correlation <span className="font-mono">{event.correlationId}</span>
           </span>
         )}
-        {event.custom_id && (
-          <span>
-            Custom id <span className="font-mono">{event.custom_id}</span>
-          </span>
+        {item.itemGuid ? (
+          <>
+            <span>
+              Item id <span className="font-mono">{item.itemId}</span>
+            </span>
+            <span>
+              Item guid <span className="font-mono">{item.itemGuid}</span>
+            </span>
+          </>
+        ) : (
+          event.custom_id && (
+            <span>
+              Custom id <span className="font-mono">{event.custom_id}</span>
+            </span>
+          )
         )}
         {event.provider && <span>Provider {event.provider}</span>}
       </div>
+
+      {/* X-METADATA целиком: в таблице видны только каталог и тип медиа. */}
+      {Object.keys(metadata).length > 0 && (
+        <div>
+          <span className="text-xs font-medium">Metadata</span>
+          <div className="mt-1 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 rounded-md border border-border bg-muted/40 p-2 text-xs">
+            {Object.entries(metadata).map(([name, value]) => (
+              <React.Fragment key={name}>
+                <span className="text-muted-foreground">{name}</span>
+                <span className="font-mono break-all">
+                  {typeof value === "string" ? value : JSON.stringify(value)}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Body title="Request" raw={event.request} fileName={`request-${event.id}.json`} />
       <Body title="Response" raw={event.response} fileName={`response-${event.id}.json`} />

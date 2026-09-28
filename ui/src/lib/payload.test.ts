@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decodeBody, prettyJson, preview, formatSize, PREVIEW_LIMIT } from "./payload";
+import { decodeBody, prettyJson, preview, formatSize, parseMetadata, daminionFields, PREVIEW_LIMIT } from "./payload";
 
 const encode = (text: string) => {
   const bytes = new TextEncoder().encode(text);
@@ -67,5 +67,47 @@ describe("formatSize", () => {
     expect(formatSize(512)).toBe("512 B");
     expect(formatSize(2048)).toBe("2.0 KB");
     expect(formatSize(3 * 1024 * 1024)).toBe("3.0 MB");
+  });
+});
+
+describe("parseMetadata", () => {
+  it("разбирает base64, в котором Go отдаёт JSONB", () => {
+    expect(parseMetadata(encode('{"catalog":"Photos","mediaType":"video"}'))).toEqual({
+      catalog: "Photos",
+      mediaType: "video",
+    });
+  });
+
+  // До правки X-METADATA в колонку попадала строка с JSON внутри.
+  it("разбирает дважды закодированный JSON старых событий", () => {
+    expect(parseMetadata(encode(JSON.stringify('{"catalog":"Photos"}')))).toEqual({ catalog: "Photos" });
+  });
+
+  it("пустые и битые метаданные - пустой объект", () => {
+    expect(parseMetadata(undefined)).toEqual({});
+    expect(parseMetadata(null)).toEqual({});
+    expect(parseMetadata(encode("{}"))).toEqual({});
+    expect(parseMetadata(encode("[1,2]"))).toEqual({});
+    expect(parseMetadata("не base64")).toEqual({});
+  });
+});
+
+describe("daminionFields", () => {
+  it("делит custom id на id и guid элемента", () => {
+    expect(
+      daminionFields({
+        custom_id: "12345:0f1e-aa",
+        metadata: encode('{"catalog":"Photos","mediaType":"photo"}'),
+      }),
+    ).toEqual({ catalog: "Photos", mediaType: "photo", itemId: "12345", itemGuid: "0f1e-aa" });
+  });
+
+  it("чужой custom id показывает целиком", () => {
+    expect(daminionFields({ custom_id: "run-7" })).toEqual({
+      catalog: "",
+      mediaType: "",
+      itemId: "run-7",
+      itemGuid: "",
+    });
   });
 });
