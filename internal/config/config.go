@@ -124,18 +124,20 @@ var k = koanf.New(".")
 func LoadConfig(log *zap.Logger) (*Config, error) {
 	cfg := &Config{}
 
-	err := env.Parse(cfg)
+	// .env has to land in the process environment before env.Parse reads it below -
+	// otherwise a value set only in .env (not already exported) is silently missed.
+	err := prepareDotEnv(".env")
+	if err != nil {
+		log.Sugar().Infof("error loading config from .env file: %v", err)
+	}
+
+	err = env.Parse(cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	if cfg.EnableEncrytion && len(cfg.EncryptionEndpoint) == 0 {
 		return nil, errors.New("encryption endpoint cannot be empty")
-	}
-
-	err = prepareDotEnv(".env")
-	if err != nil {
-		log.Sugar().Infof("error loading config from .env file: %v", err)
 	}
 
 	cfgPath := os.Getenv("CONFIG_FILE_NAME")
